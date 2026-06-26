@@ -121,3 +121,23 @@ allowed-tools: []
 
 ### Claude Code 调用
 `/debug-expert` — 列出全部已知错误；或 `/debug-expert <关键词>` 搜索特定错误。
+
+---
+
+## ⚡ 自动化收录规则（给 Claude 自己看的）
+
+每完成一个任务或一组操作后，**主动回顾**是否遇到新坑，满足以下任一条件立即追加：
+
+1. 任何报错/异常/失败经过排查才解决
+2. 工具/命令的行为与预期不符，导致走了弯路
+3. 环境/平台的特定行为（Windows/网络/Python 版本差异等）
+4. 某个配置或参数值设置不当导致的错误
+
+追加后**必须**：
+- `C:\Users\EDY\debug-expert` → git add index → commit → push 远端
+- 同步 `C:\Users\EDY\.claude\skills\debug-expert\SKILL.md`（安装副本）
+- 更新 `C:\Users\EDY\.claude\CLAUDE.md` 的速查列表（如果是高频坑）
+
+**不需要收录**：纯业务逻辑 bug、一次性笔误、已在 skill 中记录的坑。
+
+**绝对不要等用户提醒，自己判断、自己收录。**
