@@ -141,3 +141,55 @@ allowed-tools: []
 **不需要收录**：纯业务逻辑 bug、一次性笔误、已在 skill 中记录的坑。
 
 **绝对不要等用户提醒，自己判断、自己收录。**
+
+---
+
+### 11. Docker 容器内 MinIO URL 浏览器不可达
+
+- **标签**：`docker` `minio` `url` `nginx` `proxy`
+- **现象**：后端返回的图片 URL 是 `http://localhost:9000/bucket/key`，浏览器从 `10.60.0.26:5173` 访问时，`localhost` 指向用户本机而非服务器，图片加载失败。
+- **根因**：MinIO 在 Docker 容器内，后端用内部 endpoint 生成 URL（`localhost:9000`），浏览器无法访问 Docker 内部网络。
+- **修复**：
+  1. 后端 `storage.py` 返回**相对路径** `/bucket/key`
+  2. 前端 nginx 添加 MinIO 代理 location：
+     ```
+     location /canvas-assets/ { proxy_pass http://minio:9000/canvas-assets/; }
+     location /canvas-artifacts/ { proxy_pass http://minio:9000/canvas-artifacts/; }
+     ```
+  3. 原理：浏览器请求 `http://10.60.0.26:5173/canvas-assets/xxx` → nginx 透明转发到 MinIO 容器
+- **原则**：Docker 服务间用 service name 通信，但**面向浏览器的 URL 必须走 nginx 代理**或完整外部 IP/域名。
+
+### 12. Konva React 图片坐标飘出 Frame 不可见
+
+- **标签**：`konva` `canvas` `coordinates` `frontend` `react`
+- **现象**：上传图片后端 200 OK，MinIO URL 可访问，但图片在前端画布上不显示（「上传了 3 张图没一张显示」）。
+- **根因**：图片 transform 的 `cx/cy` 硬编码为 `{cx:600, cy:450}`，对于 width=1920 的大图，`imgX = cx - width/2 = 600-960 = -360`，图片被推到 Frame 可视范围之外。
+- **修复**：
+  1. 图片 `cx` 设为 Frame 中心：`cx = frameWidth / 2`
+  2. 图片自适应缩放：`scale = Math.min(maxW / imgW, maxH / imgH, 1)`
+  3. Frame Group **必须设置 x/y 定位**（Frame 左上角），子元素坐标相对 Group 内部
+- **原则**：Canvas 中**子元素坐标始终相对于父容器左上角**，不要硬编码绝对像素值，大图必须先计算缩放因子。
+
+### 13. nginx 默认 body 大小限制导致大图上传 413
+
+- **标签**：`nginx` `upload` `413` `client_max_body_size`
+- **现象**：用户上传较大图片（>1MB）时浏览器报 413 Request Entity Too Large。
+- **根因**：nginx 默认 `client_max_body_size 1m`，超过 1MB 的图片直接拒绝。
+- **修复**：nginx.conf 添加 `client_max_body_size 50m;`（server 级别 + `/api/` location 级别都加）。
+- **原则**：任何走 nginx 代理的文件上传路径，必须在上线前调整 body 大小限制。
+
+### 14. YAML 缩进错误导致 docker-compose 服务解析失败
+
+- **标签**：`docker-compose` `yaml` `validation`
+- **现象**：`docker-compose config --services` 报错 `Additional property environment is not allowed`，服务定义被错误解析到 `volumes` 顶级键下。
+- **根因**：用 `cat >> file << 'EOF'` 追加 YAML 内容时，行首缩进与已有内容不一致，YAML 解析器把新服务的键值对绑到了错误的父级下。
+- **修复**：不要用 shell heredoc 追加 YAML，用 Python `yaml.dump()` 来修改：
+  ```python
+  import yaml
+  with open("docker-compose.yml") as f:
+      d = yaml.safe_load(f)
+  d["services"]["new-service"] = {...}
+  with open("docker-compose.yml", "w") as f:
+      yaml.dump(d, f, default_flow_style=False, sort_keys=False)
+  ```
+- **原则**：YAML 对缩进极度敏感，任何结构修改都通过 `yaml.safe_load` + `yaml.dump` 闭环，不要手写或 shell 拼接。修改后立即 `docker-compose config` 验证。
