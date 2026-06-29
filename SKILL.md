@@ -193,3 +193,40 @@ allowed-tools: []
       yaml.dump(d, f, default_flow_style=False, sort_keys=False)
   ```
 - **原则**：YAML 对缩进极度敏感，任何结构修改都通过 `yaml.safe_load` + `yaml.dump` 闭环，不要手写或 shell 拼接。修改后立即 `docker-compose config` 验证。
+
+### 15. React Konva `onRef` 回调中调用 `setState` 导致 React #185 死循环
+
+- **标签**：`react-konva` `onRef` `React185` `setState`
+- **现象**：浏览器报 `Minified React error #185`，页面白屏。
+- **根因**：Konva `onRef` 在 render 阶段调用，`onRef` 中 `setImageRefs((prev) => ({...}))` 触发渲染期间 setState → 无限重渲染崩溃。
+- **修复**：State → useRef：`const imageRefs = useRef({})`，`onRef` 中直接赋值 `imageRefs.current[id] = node`。
+- **原则**：Konva `onRef`/`ref` 回调禁止 `setState`，必须用 `useRef`。
+
+### 16. Konva `getAbsoluteTransform().getScale()` 不存在
+
+- **标签**：`konva` `api` `getAbsoluteScale`
+- **现象**：`TypeError: getAbsoluteTransform(...).getScale is not a function`。
+- **修复**：`node.getAbsoluteScale().x / node.getAbsoluteScale().y`
+- **原则**：Konva scale 用 `node.scaleX()/scaleY()`（相对）或 `node.getAbsoluteScale()`（绝对）。
+
+### 17. Docker 构建缓存导致旧文件持续部署
+
+- **标签**：`docker` `build-cache` `vite` `frontend`
+- **现象**：源码更新后 `docker-compose up -d --build` 仍使用旧 bundle，新功能不生效。
+- **根因**：Docker `COPY package.json .` + `RUN npm install` 层被缓存，后面 `COPY . .` 和 `RUN vite build` 即使源码变了也复用旧层。
+- **修复**：
+  1. `docker-compose build --no-cache frontend` 强制重建
+  2. 或先删除旧镜像 `docker rmi -f docker-frontend`
+  3. 绝对不用 `docker cp` / `docker run --mount` 绕过构建流程
+- **原则**：前端更新必须走 `docker-compose build --no-cache` 或先删镜像，不允许手动拷贝文件进容器。
+
+### 18. Claude Code 插件安装后 MCP 不自动加载
+
+- **标签**：`mcp` `plugin` `playwright` `.mcp.json`
+- **现象**：通过 `/plugin install` 或插件市场安装了某个 MCP 插件（如 Playwright），但 `ListMcpResourcesTool` 中看不到该 MCP，MCP 功能不可用。
+- **根因**：Claude Code 的 MCP 加载走的是**工作目录下的 `.mcp.json`**（如 `D:\.mcp.json`）。插件安装只把配置写入 `~/.claude/plugins/...` 插件目录，**不会自动合并**到工作目录的 `.mcp.json` 中。两个配置文件是独立的，Claude Code 不会跨文件合并。
+- **修复**：
+  1. 查看插件目录下的 `.mcp.json` 找到该 MCP 的配置（如 `C:\Users\EDY\.claude\plugins\marketplaces\...\playwright\.mcp.json`）
+  2. 把对应的 `mcpServers` 条目**手动拷贝**到工作目录的 `.mcp.json`（如 `D:\.mcp.json`）
+  3. 重启 Claude Code 或重新加载 MCP
+- **原则**：安装任何 MCP 插件后，**必须检查工作目录 `.mcp.json` 是否包含该条目**，没有就手动加上。插件目录的 `.mcp.json` 只是注册声明，不会自动生效。
