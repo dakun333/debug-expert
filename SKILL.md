@@ -220,13 +220,56 @@ allowed-tools: []
   3. 绝对不用 `docker cp` / `docker run --mount` 绕过构建流程
 - **原则**：前端更新必须走 `docker-compose build --no-cache` 或先删镜像，不允许手动拷贝文件进容器。
 
-### 18. Claude Code 插件安装后 MCP 不自动加载
+### 18. MCP 服务器接入：完整操作流程与常见坑
 
-- **标签**：`mcp` `plugin` `playwright` `.mcp.json`
-- **现象**：通过 `/plugin install` 或插件市场安装了某个 MCP 插件（如 Playwright），但 `ListMcpResourcesTool` 中看不到该 MCP，MCP 功能不可用。
-- **根因**：Claude Code 的 MCP 加载走的是**工作目录下的 `.mcp.json`**（如 `D:\.mcp.json`）。插件安装只把配置写入 `~/.claude/plugins/...` 插件目录，**不会自动合并**到工作目录的 `.mcp.json` 中。两个配置文件是独立的，Claude Code 不会跨文件合并。
-- **修复**：
-  1. 查看插件目录下的 `.mcp.json` 找到该 MCP 的配置（如 `C:\Users\EDY\.claude\plugins\marketplaces\...\playwright\.mcp.json`）
-  2. 把对应的 `mcpServers` 条目**手动拷贝**到工作目录的 `.mcp.json`（如 `D:\.mcp.json`）
-  3. 重启 Claude Code 或重新加载 MCP
-- **原则**：安装任何 MCP 插件后，**必须检查工作目录 `.mcp.json` 是否包含该条目**，没有就手动加上。插件目录的 `.mcp.json` 只是注册声明，不会自动生效。
+- **标签**：`mcp` `plugin` `playwright` `.mcp.json` `.claude.json`
+- **版本**：Claude Code v2.1.195（2026-06）
+
+#### 配置文件优先级与位置
+
+Claude Code v2.1.x 的 MCP 配置存在**两个位置**，会合并加载：
+
+| 文件 | 路径 | 用途 |
+|------|------|------|
+| `.mcp.json` | `<工作目录>/.mcp.json`（如 `D:\.mcp.json`） | 项目级声明，**需用户批准** |
+| `.claude.json` | `C:\Users\<用户名>\.claude.json` → `projects["<路径>"].mcpServers` | CLI `mcp add` 写入的实际生效位置 |
+
+**关键坑**：`.mcp.json` 中的服务器必须经过用户批准才会连接。如果之前被拒绝过，会进入 `disabledMcpjsonServers` 列表，即使 `.mcp.json` 内容正确也不会生效。
+
+#### 接入新 MCP 的正确流程
+
+1. **用 CLI 添加**（推荐，一步到位）：
+   ```
+   claude mcp add <名称> -- <命令> [args...]
+   ```
+   示例：`claude mcp add playwright -- npx @playwright/mcp@latest`
+   这会把配置写入 `.claude.json` 的 `projects["当前路径"].mcpServers`，**立即生效**。
+
+2. **或手动编辑 `.mcp.json`**（需要额外批准步骤）：
+   - 编辑 `<工作目录>/.mcp.json`
+   - 重启 Claude Code → 会提示「New MCP server detected, approve?」
+   - 如果看不到提示 → 可能之前被拒绝了，运行 `claude mcp reset-project-choices`
+
+3. **从插件市场安装的 MCP**：
+   - 插件只把 `.mcp.json` 写入 `~/.claude/plugins/marketplaces/.../` 插件目录
+   - 不会自动合并到工作目录的 `.mcp.json` 或 `.claude.json`
+   - **必须**手动执行步骤 1 或 2
+
+#### 诊断命令
+
+```
+claude mcp list                        # 列出所有已连接的 MCP 服务器
+claude mcp get <名称>                   # 查看某个服务器的详细状态
+claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝状态
+```
+
+#### Playwright MCP 额外注意事项
+
+- MCP 服务器（`npx @playwright/mcp@latest`）和 Playwright 浏览器是**分开的**
+- 浏览器需要手动安装：`npx playwright install chromium`
+- 浏览器安装可能因网络问题失败（`cdn.playwright.dev` TLS 连接被重置 → 多试几次）
+- 安装后浏览器放在 `%LOCALAPPDATA%\ms-playwright\`
+
+#### 验证 MCP 是否可用
+
+在会话中调用 `ListMcpResourcesTool` 或直接尝试使用该 MCP 的工具。注意：**MCP 在 session 启动时加载**，修复配置后必须重启 Claude Code 才会生效。
