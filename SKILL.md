@@ -273,3 +273,23 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 #### 验证 MCP 是否可用
 
 在会话中调用 `ListMcpResourcesTool` 或直接尝试使用该 MCP 的工具。注意：**MCP 在 session 启动时加载**，修复配置后必须重启 Claude Code 才会生效。
+
+### 19. 钉钉文档：keyboard.type() 无法创建 Markdown 表格，必须用 Ctrl+V 粘贴
+
+- **标签**：`dingtalk` `钉钉` `markdown` `表格` `playwright`
+- **现象**：用 Playwright `keyboard.type()` 逐字符输入 MD 内容到钉钉文档编辑器，`|...|` 表格分隔行被当作文本，所有后续内容挤进一个单元格。多行内容容易丢失。
+- **根因**：
+  1. 钉钉编辑器的 Markdown 表格解析器需要**整体内容**才能识别表格结构，`keyboard.type()` 逐字符输入不触发表格解析
+  2. `keyboard.type()` 中的 `\n` 不是真正的 Enter 按键事件，编辑器不识别为换行
+  3. 钉钉编辑器有约 40 行的实时输入缓冲区，超过会丢弃前面内容
+  4. 钉钉编辑器使用虚拟滚动，Playwright 的 `locator()` 只能查到可见 DOM 元素（内容没丢只是不在视口）
+- **修复**：
+  1. **用 `Ctrl+V` 粘贴 MD 纯文本**（非 HTML！），钉钉编辑器会自动识别并转换 Markdown + 表格
+  2. 流程：PowerShell 复制 MD 到剪贴板 → MCP Playwright 打开文档 → 编辑模式 → 全选清空 → Ctrl+V → 等 8 秒解析
+  3. 验证时先 `Ctrl+Home` 回到顶部再检查标题
+  4. 单次粘贴上限约 4000-5000 字符，超长文档需要分段
+- **禁止操作**：
+  - ❌ 用 `keyboard.type(md, delay=0)` 输入含表格的 MD
+  - ❌ 把 `\n` 嵌入 `keyboard.type()` 字符串期望换行
+  - ❌ 用 HTML 格式剪贴板（CF_HTML）粘贴
+- **参考**：`D:\project\2026\dingtalk_md_sync_方法总结.md`、`C:\Users\EDY\.claude\projects\D--\memory\dingtalk-md-sync.md`
