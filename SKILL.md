@@ -293,3 +293,62 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
   - ❌ 把 `\n` 嵌入 `keyboard.type()` 字符串期望换行
   - ❌ 用 HTML 格式剪贴板（CF_HTML）粘贴
 - **参考**：`D:\project\2026\dingtalk_md_sync_方法总结.md`、`C:\Users\EDY\.claude\projects\D--\memory\dingtalk-md-sync.md`
+
+### 20. 🚫 禁止为解决一个问题删除/牺牲已有功能
+
+- **标签**：`原则` `功能回退` `禁止` `最高优先级`
+- **现象**：开发中遇到某个参数（如 Ollama 的 `options.num_predict`）导致空响应，直接把整个 options 功能删掉。
+- **根因**：遇到问题时，条件反射式地"去掉导致问题的东西"，而不是找到既能保留功能又不触发问题的方案。
+- **修复原则**：
+  1. 先查文档、测试不同参数值，找到问题的精确根因
+  2. 保留功能的完整性，只修改触发问题的具体参数值
+  3. 如果不能直接解决，找替代方案（如 Ollama 用 `num_predict=512` 而非 256 或 0）
+- **验证**：改动后确认所有原有功能仍可用，不是"功能少了但问题没了"。
+- **红线**：任何改动不得以牺牲已有功能为代价。想不出保留功能的方案 → 停下、查文档、问用户。
+
+### 20. ArXiv API HTTP → HTTPS 301 重定向
+
+- **标签**：`arxiv` `api` `http` `301`
+- **现象**：用 `http://export.arxiv.org/api/query` 请求返回 301 Moved Permanently，feedparser 解析为空。
+- **根因**：ArXiv 已将所有 API 流量强制迁移到 HTTPS。
+- **修复**：所有 ArXiv API 调用使用 `https://export.arxiv.org/api/query`。
+
+### 21. Claude CLI 非交互模式子进程调用的坑
+
+- **标签**：`claude` `subprocess` `non-interactive` `DEVNULL`
+- **现象**：
+  1. Claude CLI `--no-interactive-stdin` 标志在 v2.1.201 中**不存在**，传入会报 `error: unknown option`
+  2. 不传 stdin 时 CLI 会等待 3 秒才继续（`Warning: no stdin data received in 3s`），但不影响输出
+  3. 定时任务中 Claude CLI 使用 WebSearch/WebFetch 需要用户交互审批 → 阻塞
+- **修复**：
+  1. 使用 `stdin=subprocess.DEVNULL` 重定向 stdin（不是 `--no-interactive-stdin` 标志）
+  2. 加 `--dangerously-skip-permissions` 跳过所有权限检查（仅限可信的定时脚本）
+  3. stderr 中的 `Warning:` 不视为错误，正常处理 stdout 输出
+- **示例**：
+  ```python
+  proc = await subprocess.create_subprocess_exec(
+      claude_path, "-p", prompt, "--dangerously-skip-permissions",
+      stdin=subprocess.DEVNULL,
+      stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+      limit=32 * 1024 * 1024,
+  )
+  ```
+
+### 22. 飞书文本消息 4000 字符限制
+
+- **标签**：`feishu` `message` `limit` `split`
+- **现象**：超长文本通过飞书 `im/v1/messages` 发送可能被截断或失败。
+- **修复**：超过 3800 字符时分段发送，在 `\n` 处自然断开，段间间隔 1 秒。
+
+### 23. LLM `max_tokens` 不足导致批量摘要 JSON 被截断 → digest 变成英文原文
+
+- **标签**：`llm` `max_tokens` `truncation` `json` `日报`
+- **现象**：AI 日报中，前 10 篇论文有规范的中文精炼摘要（📝做什么/💡创新点/📊效果/🔓开源），但后 10 篇的 digest 只有 `📝 ` 后面跟了截断的原始英文摘要前 100 字符，缺少结构化信息。同时日志中可能有 `摘要 JSON 解析失败` 的 warning。
+- **根因**：`summarize_papers()` 每批 10 篇论文，`max_tokens=4096`。10 篇中文摘要（每篇约 120 字 + JSON 结构开销）输出量接近或超过 4096 tokens → LLM 输出被截断（`finish_reason=length`）→ JSON 数组不完整（缺少 `]` 或中间截断）→ 正则/JSON 解析失败 → 走了 fallback 逻辑，直接用 `p.get('summary', '暂无摘要')[:100]` 即英文原文前 100 字作为 digest。
+- **为什么第一批 10 篇通常没问题**：不同论文的摘要长度有波动，第一批恰好没超过 4096 tokens，第二批加上累计的随机性可能超出。这是间歇性 bug，不是每次必现。
+- **修复（3 层防护）**：
+  1. **增大 `max_tokens`**：从 4096 → 16384（论文摘要），从 2048 → 8192（新闻摘要），确保批量输出不被截断
+  2. **添加 `finish_reason` 检测**：当 `finish_reason == "length"` 时输出 warning，便于监控
+  3. **添加逐条恢复 fallback**：当完整 JSON 数组解析失败时，用正则逐个匹配 `{"idx": N, "digest": "..."}` 对象单独提取，最大限度恢复数据
+- **涉及文件**：`C:\Users\EDY\feishu-bot\ai_daily_report.py` — `summarize_papers()` 和 `summarize_news()` 函数
+- **教训**：批处理调用 LLM 时，`max_tokens` 必须根据批量大小乘以单条输出预估来计算，不能只按「感觉够用」来设。10 篇 × 150 字中文 × 3 tokens/字 ≈ 4500 tokens，加上 JSON 格式开销和 prompt 说明，至少需要 6000-8000 tokens 才安全。
