@@ -374,21 +374,29 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **相关**：若真需要并发吞吐，改用 vLLM 的 `AsyncLLMEngine`（原生支持并发调度）而不是 offline `LLM`。
 - **涉及文件**：`ollama_vlm_benchmark/backend/app/vlm_engine.py` — `_chat_blocking` / `_chat_blocking_batch`
 
-### 25. stargate 网关的 gpt-image-2 不支持 chat/completions 多模态请求
+### 25. gpt-image-2 走 /v1/images/edits（不是 chat/completions），且 stargate 上 deployment 挂着
 
-- **标签**：`stargate` `llm-gateway` `gpt-image-2` `endpoint` `openai-compat`
-- **现象**：把 `gpt-image-2` 作为 `model` 传给 stargate 的 `/v1/chat/completions`（哪怕只用文本 `messages` + `modalities=["image"]`）→ 返回 400：`litellm.BadRequestError: AzureException - The requested operation is unsupported`。后端 refine 端点包了一层 502。
-- **根因**：`gpt-image-2` 走的是 **`/v1/images/generations`** 端点（OpenAI 传统 Image API），只接受 `prompt` 字段的纯文本，返回 `data[].b64_json`。不能读取输入图像，也不接受 messages 数组。真正能"读图 + 生图"的多模态模型在 stargate 上只有 gemini 的 `-image-preview` 系列：`gemini-3.1-flash-image-preview` 和 `gemini-3-pro-image-preview` 可正常调 `/v1/chat/completions`；`gemini-3-flash-preview`、`gemini-3.5-flash`、`gemini-3.1-pro-preview` 走 chat/completions + image modalities 均返 400。
-- **判定方法**：curl 直接测：
-  ```bash
-  # 能否走 chat/completions 多模态生图
-  curl http://llm-gateway-internal.hs99.vip/v1/chat/completions \
-    -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
-    -d '{"model":"<MODEL>","modalities":["image"],"messages":[{"role":"user","content":"draw a red apple"}]}'
-  # 能否走 images/generations 纯生图
-  curl http://llm-gateway-internal.hs99.vip/v1/images/generations \
-    -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
-    -d '{"model":"gpt-image-2","prompt":"a red apple","n":1,"size":"1024x1024"}'
-  ```
-- **建议**：前端如果做 refine 模型选择器，只把"能读图+能生图 via chat/completions"的模型放进选项（当前仅 2 个 gemini image-preview 系列）；要暴露 gpt-image-2 需要后端 client 分派 endpoint。
-- **涉及文件**：`ollama_vlm_benchmark/backend/app/stargate_client.py` — 目前统一走 `chat_completion`，未支持 `images/generations`
+- **标签**：`stargate` `llm-gateway` `gpt-image-2` `openai-image-api` `images-edits` `multipart`
+- **正确使用方法**（[OpenAI 官方文档](https://developers.openai.com/api/docs/guides/image-generation) 明确写"There is no support in Chat Completions"）：
+  - **纯文本生图** → `POST /v1/images/generations`：`{"model":"gpt-image-2","prompt":"..."}`
+  - **文本 + 图片输入**（refine 场景要用这个） → `POST /v1/images/edits` **multipart/form-data**：
+    ```python
+    httpx.post(f"{gateway}/v1/images/edits",
+      headers={"Authorization": f"Bearer {KEY}"},
+      files={"image": ("in.png", png_bytes, "image/png")},  # 可多个
+      data={"model": "gpt-image-2", "prompt": "..."})
+    # 返回 {"data":[{"b64_json":"..."}]}
+    ```
+  - **另一路径**：Responses API 的 `image_generation` 工具（需 gpt-5.5 mainline 调，多轮编辑用）
+- **错误的走法**（会返 400 "AzureException - The requested operation is unsupported"）：把 gpt-image-2 塞进 `/v1/chat/completions` 的 model 字段。第一次踩这个坑是因为直接沿用 gemini image-preview 系列的 chat/completions 流程。
+- **stargate 当前实际状态**（2026-07 实测）：
+  - GET `/v1/images/edits` → 405（路由注册了，只允许 POST）
+  - POST `/v1/images/edits` + `model=gpt-image-2` → **有时返 429**（"No deployments available, cooldown"）→ **有时返 404**（"AzureException - Resource not found"）
+  - 说明：LiteLLM 注册了 gpt-image-2 model group，但 Azure 后端部署当前不可用（endpoint 路径可能没配对）。**这是网关运维问题**，客户端代码无法解决。
+- **实用建议**：要在 refine 面板暴露 gpt-image-2，需要 (1) `stargate_client.py` 加 `image_edit(image_bytes, prompt, model)` 走 multipart POST，(2) `main.py` refine 端点按 model 分派：gemini 走 chat/completions、gpt-image-2 走 images/edits。**当前 stargate deployment 挂着，先在前端下拉里移除该选项**，等运维修好再放回来。
+- **可读图+可生图的候选（stargate 实测可用）**：只有 `gemini-3.1-flash-image-preview` 和 `gemini-3-pro-image-preview` 能走 chat/completions + `modalities=["image"]`。其它 gemini (`gemini-3-flash-preview` / `gemini-3.5-flash` / `gemini-3.1-pro-preview`) 相同请求返 400 "Vertex_aiException Request contains an invalid argument"。
+- **诊断技巧**：
+  - `curl -X GET <endpoint>` 返 405 = 路由注册了；返 404 = 路由不存在
+  - 429 "No deployments available" = model 注册了但 deployment 冷却/不可用
+  - 400 "operation is unsupported" = 用错端点了（比如把生图模型塞进 chat/completions）
+- **涉及文件**：`ollama_vlm_benchmark/backend/app/stargate_client.py` — 目前只有 `chat_completion`，未实现 `image_edit`
