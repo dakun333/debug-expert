@@ -352,3 +352,24 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
   3. **添加逐条恢复 fallback**：当完整 JSON 数组解析失败时，用正则逐个匹配 `{"idx": N, "digest": "..."}` 对象单独提取，最大限度恢复数据
 - **涉及文件**：`C:\Users\EDY\feishu-bot\ai_daily_report.py` — `summarize_papers()` 和 `summarize_news()` 函数
 - **教训**：批处理调用 LLM 时，`max_tokens` 必须根据批量大小乘以单条输出预估来计算，不能只按「感觉够用」来设。10 篇 × 150 字中文 × 3 tokens/字 ≈ 4500 tokens，加上 JSON 格式开销和 prompt 说明，至少需要 6000-8000 tokens 才安全。
+
+### 24. vLLM offline `LLM.chat` 非线程安全 → 多请求并发进入 EngineCore 死锁
+
+- **标签**：`vllm` `threading` `deadlock` `offline-api` `LLM.chat` `run_in_executor`
+- **现象**：前端并发发起多个 VLM 推理请求（用户连续点击），后端 hang，`GPU 利用率 0% 但显存占用满`，请求 120s 都不返回。`py-spy dump` 显示多个 `ThreadPoolExecutor` 线程都卡在 `llm.chat` → `_run_engine` → `get_output` → `wait(threading.py:355)`。
+- **根因**：vLLM 的 offline entrypoint `LLM` 类**非线程安全**。多个线程同时调 `self._llm.chat(...)` 会让内部 EngineCore 的输出 queue 状态混乱、互相等对方的 output 而永远拿不到，形成死锁。asyncio 侧 `await run_in_executor(None, self._chat_blocking_batch, ...)` 会用默认 ThreadPool，请求一多就同时进 chat。
+- **触发场景**：前端去掉请求串行化（比如删了 `busyRef`）后连续点击；或后端多个 route 都调 vLLM 的 offline API。
+- **修复**：在封装 vLLM 的 engine 类里加 `threading.Lock`，串行化所有 `LLM.chat` 调用：
+  ```python
+  import threading
+  class LocalVLMEngine:
+      def __init__(self, ...):
+          self._llm_lock = threading.Lock()
+      def _chat_blocking_batch(self, ...):
+          with self._llm_lock:
+              outputs = self._llm.chat(all_openai, **chat_kwargs)
+  ```
+- **验证方法**：3 个并发 request 同时打过来，应全部 200，每个耗时约 `N * 单次推理时长`（串行执行）。之前是 hang 死到超时。
+- **诊断技巧**：进程 hang 时 `docker exec <backend> py-spy dump --pid 1 | tail -80`，看是不是多个线程都卡在同一个 vLLM 内部函数。
+- **相关**：若真需要并发吞吐，改用 vLLM 的 `AsyncLLMEngine`（原生支持并发调度）而不是 offline `LLM`。
+- **涉及文件**：`ollama_vlm_benchmark/backend/app/vlm_engine.py` — `_chat_blocking` / `_chat_blocking_batch`
