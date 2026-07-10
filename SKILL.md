@@ -406,9 +406,11 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **标签**：`vllm` `qwen3-vl` `text-reasoning` `sampling` `temperature` `prompt-preprocess`
 - **场景**：用本地 Qwen3.6-35B-VL 做"把 user_text 按 marker 分解"这类**纯文本推理**任务时，用户输入`"把 2 和 3 的位置互换"`或`"1换成2的样子"`，VLM 输出的方向经常反（把目标当来源、来源当目标）。同一 prompt 多次跑结果还会飘。
 - **两个独立原因**（都要修才稳）：
-  1. **默认采样偏随机**：Qwen 官方通用推荐 `temperature=0.7, top_p=0.8, presence_penalty=1.5` 对识别/写作 OK，但推理任务**方向判断**会不稳定。
-     - 修：`temperature=0.1, top_p=0.9, top_k=20, presence_penalty=0, seed=固定值`。同一输入 3 次跑结果完全一致。
-     - **presence_penalty 一定要清 0**：推理任务需要复用 few-shot 例子里的关键词（"变成 #X 的样子"），高 penalty 让模型规避这些 token 反而误伤。
+  1. **默认采样含 presence_penalty**：Qwen 官方通用推荐 `temperature=0.7, top_p=0.8, presence_penalty=1.5` 对识别/写作 OK，但推理任务**方向判断**会不稳定。
+     - 修（最终版）：`temperature=0.7, top_p=0.8, top_k=20, min_p=0.0, presence_penalty=0, seed=固定值`
+     - **temperature 别调太低**（0.1 那种）：会让"错的地方永远错"，seed 会锁死错误答案。0.6-0.7 才能让模型正常思考
+     - **presence_penalty 一定要清 0**：推理任务需要复用 few-shot 例子里的关键词（"变成 #X 的样子"），高 penalty 让模型规避这些 token 反而误伤
+     - **seed 固定**：可复现（同一输入 3 次跑结果完全一致），方便调试和 few-shot 迭代
   2. **裸数字方向识别弱**：Qwen3.6-VL 对 `#3` 这种明确 marker 格式方向识别 100% 稳定，对`"3"`裸数字经常把"X 换成 Y"里的 X/Y 角色搞反。
      - 修：**预处理 user_text，把 1..N 范围的裸数字自动补 # 前缀**，然后再送 VLM。
      - 正则：`re.sub(r'(?<![\d#])(\d+)(?!\d)', lambda m: f'#{n}' if 1<=int(m.group(1))<=N else m.group(0), text)`
