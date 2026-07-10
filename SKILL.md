@@ -425,3 +425,59 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
   这两点搞对，弱模型也能达到强模型的效果。别急着换模型。
 - **相关**：vLLM `SamplingParams` 支持所有关键参数（seed、min_p、structured_outputs 等），通过 `sampling_override` 参数覆盖默认 `_chat_blocking_batch` 里的值
 - **涉及文件**：`ollama_vlm_benchmark/backend/app/main.py` `_normalize_marker_refs` + `_decompose_user_text_per_marker`；`vlm_engine.py` `chat_with_images_batch` 的 `sampling_override` 参数
+
+### 27. 整理 session 汇总文档时漏掉 context 压缩前的内容
+
+- **标签**：`session` `context-compact` `documentation` `transcript` `summary`
+- **现象**：用户让我把整个 session 的对话内容整理成汇总文档，我基于当前 context 里看到的内容写完后，用户反馈"不全啊，session 的起初不是这个原因"。我把 session 中后段的一个具体 bug（vLLM 死锁 hang）当成了 session 起点，实际真正起点是 4 天前修复另一个旧项目的 GPU OOM 崩溃。
+- **根因**：Claude Code 的 session context **压缩机制**（context compact）。session 变长后，早期对话会被压缩成 summary（原始 message 内容不再保留在 context 里）。我进入 context 时看到的是「最后一次 compact 的 summary + 后续未压缩的原始对话」，如果之前有多次 compact，就只能看到最后一段。此案例 session 共 152 turns，被压缩了 2 次（Turn 66、Turn 129），我进入时只看到 Turn 130+ 的原始对话。
+- **识别 context 压缩的信号**：conversation 里出现这段 **continuation summary 标记**：
+  ```
+  This session is being continued from a previous conversation that ran out of context.
+  The summary below covers the earlier portion of the conversation.
+  Summary:
+  1. Primary Request and Intent: ...
+  2. Key Technical Concepts: ...
+  ...
+  If you need specific details from before compaction, read the full transcript at:
+  C:\Users\EDY\.claude\projects\<session_prefix>\<session_id>.jsonl
+  ```
+  见到这个标记就说明**前面部分已被压缩**，写"整个 session 总结"时不能只靠 context 里看到的。
+- **修复流程**（每次写 session 总结前的必做步骤）：
+  1. **先扫 continuation 标记**：在 context 里 grep `"This session is being continued from"` 或 `"ran out of context"`。有 → 需要读 JSONL。
+  2. **定位 JSONL 路径**：`C:\Users\EDY\.claude\projects\<session_prefix>\<session_id>.jsonl`。session_id 可以从 continuation 消息末尾的 `read the full transcript at:` 拿。
+  3. **用 Python 抽取所有 user turn**（不能一次 Read 整个 JSONL，可能 35MB+）：
+     ```python
+     import json
+     with open(jsonl_path, encoding='utf-8') as f:
+         for line in f:
+             obj = json.loads(line)
+             if obj.get('type') != 'user': continue
+             content = None
+             if 'message' in obj:
+                 c = obj['message'].get('content')
+                 if isinstance(c, str): content = c
+                 elif isinstance(c, list):
+                     content = '\n'.join(x.get('text','') for x in c if isinstance(x,dict) and x.get('type')=='text')
+             if not content or content.startswith(('<','Caveat:','[Request','[Image')): continue
+             if 'system-reminder' in content[:200] or 'tool_use_id' in content[:200]: continue
+             # write content
+     ```
+  4. **按用户 turn 梳理阶段**：真实用户消息才是需求节点，assistant 输出和 tool_result 都是过程，不要用后者划分阶段
+  5. **写"整个 session"级别的文档时必须覆盖 Turn 1 起**：如果有 compact，必须把压缩前的部分从 JSONL 补回来
+- **JSONL message 结构要点**：
+  - `type: "user"` 是用户消息（**不是** `type: "message"` 且 `role: "user"`；后者已过时）
+  - `type: "assistant"` 是模型回复
+  - `type: "tool_use"` / `type: "tool_result"` 是工具调用/结果，不算 user turn
+  - `type: "text"` / `type: "thinking"` 也不算 user turn
+  - user turn 的 content 可能是纯 string，也可能是 list of content blocks（含 tool_result、image、text 等）
+  - 过滤系统消息：以 `<`、`Caveat:`、`[Request`、`[Image` 开头的、或含 `system-reminder`/`tool_use_id` 的 200 字符前缀
+- **不该做的**（此案例的教训）：
+  - **不该**：只看 context 里能看到的就写 session 总结（会遗漏所有已压缩的历史）
+  - **不该**：把 compact summary 里"最近的一个 bug"当成 session 起点
+  - **不该**：假设 project 目录一直是同一个（此案例中 session 里从旧项目 pivot 到全新项目，if 只看后半段就不知道 pivot 存在）
+- **诊断技巧**：
+  - `wc -l <jsonl>` 看总消息数（此案例 9529 行）
+  - `head -50 <jsonl> | grep -o '"type":"[^"]*"' | sort | uniq -c` 看 message 类型分布
+  - `python -c "import json; [print(json.loads(l).get('type')) for l in open(...).read().splitlines()[:20]]"` 看前 20 条 type
+- **涉及文件**：`C:\Users\EDY\.claude\jobs\<job>\tmp\extract_user_turns.py`（可复用的抽取脚本）；`D:\project\2026\vlm_project_docs\why_summary_incomplete.md`（此案例复盘）
