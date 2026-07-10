@@ -400,3 +400,26 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
   - 429 "No deployments available" = model 注册了但 deployment 冷却/不可用
   - 400 "operation is unsupported" = 用错端点了（比如把生图模型塞进 chat/completions）
 - **涉及文件**：`ollama_vlm_benchmark/backend/app/stargate_client.py` — 目前只有 `chat_completion`，未实现 `image_edit`
+
+### 26. Qwen3.6-35B（VL）方向判断：#N 稳、裸数字飘 + 推理任务用低 temperature
+
+- **标签**：`vllm` `qwen3-vl` `text-reasoning` `sampling` `temperature` `prompt-preprocess`
+- **场景**：用本地 Qwen3.6-35B-VL 做"把 user_text 按 marker 分解"这类**纯文本推理**任务时，用户输入`"把 2 和 3 的位置互换"`或`"1换成2的样子"`，VLM 输出的方向经常反（把目标当来源、来源当目标）。同一 prompt 多次跑结果还会飘。
+- **两个独立原因**（都要修才稳）：
+  1. **默认采样偏随机**：Qwen 官方通用推荐 `temperature=0.7, top_p=0.8, presence_penalty=1.5` 对识别/写作 OK，但推理任务**方向判断**会不稳定。
+     - 修：`temperature=0.1, top_p=0.9, top_k=20, presence_penalty=0, seed=固定值`。同一输入 3 次跑结果完全一致。
+     - **presence_penalty 一定要清 0**：推理任务需要复用 few-shot 例子里的关键词（"变成 #X 的样子"），高 penalty 让模型规避这些 token 反而误伤。
+  2. **裸数字方向识别弱**：Qwen3.6-VL 对 `#3` 这种明确 marker 格式方向识别 100% 稳定，对`"3"`裸数字经常把"X 换成 Y"里的 X/Y 角色搞反。
+     - 修：**预处理 user_text，把 1..N 范围的裸数字自动补 # 前缀**，然后再送 VLM。
+     - 正则：`re.sub(r'(?<![\d#])(\d+)(?!\d)', lambda m: f'#{n}' if 1<=int(m.group(1))<=N else m.group(0), text)`
+     - 边界：`(?<![\d#])` 防 `#3` 被匹配、`(?!\d)` 防 `10` 被拆成 `1`；范围限制 `1..N` 避免"10 个红色"这种数量描述误伤。
+- **测试记录**（Qwen3.6-35B AWQ / 4 个 marker）：
+  - 修前：6 场景 4 通过，多 clause 复合场景 100% 错
+  - 只降 temperature：6 场景 5 通过（三重循环仍反）
+  - 降 temperature + 数字预处理：6 场景 6 通过、3 次结果几乎一致
+- **教训**：当 LLM 在**逻辑推理任务**上表现飘时，先怀疑：
+  1. 采样参数是不是"通用/写作"配置（temp 0.7、有 penalty）？推理要低温 + 无 penalty + 固定 seed
+  2. 输入格式是不是有"歧义符号"（裸数字、代词）？把它们规范化到显式格式（#N、明确名字）
+  这两点搞对，弱模型也能达到强模型的效果。别急着换模型。
+- **相关**：vLLM `SamplingParams` 支持所有关键参数（seed、min_p、structured_outputs 等），通过 `sampling_override` 参数覆盖默认 `_chat_blocking_batch` 里的值
+- **涉及文件**：`ollama_vlm_benchmark/backend/app/main.py` `_normalize_marker_refs` + `_decompose_user_text_per_marker`；`vlm_engine.py` `chat_with_images_batch` 的 `sampling_override` 参数
