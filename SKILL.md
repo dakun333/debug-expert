@@ -389,3 +389,22 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **验证**：部署前后 `docker ps` 看 backend 容器的 `Status` 的 `Up X days` 不变（没重启），`docker logs backend --tail 5` 无 `[vLLM] 开始加载` 日志。
 - **原则**：docker-compose 增量部署时，`up -d <服务名>` 是安全的，只动该服务。但 `build --no-cache` 不带服务名会重建全部镜像（慢），**务必带服务名** `docker-compose build --no-cache frontend`。
 
+### 26. docker cp 覆盖 nginx html 不删旧 assets，残留旧 bundle
+
+- **标签**：`deploy` `docker-cp` `nginx` `vite` `前端增量`
+- **项目**：`D:\project\2026\hungry_arit\ollama_vlm_benchmark\frontend` → 远程 `root@10.60.0.26` 容器 `ollama_vlm_benchmark-frontend-1`
+- **现象**：纯前端 UI 改动，本地 `npm run build` 后用 `tar|ssh` 传 dist 到远程，再 `docker cp /tmp/fe_new/. <容器>:/usr/share/nginx/html/` + `nginx -s reload`。页面 200 OK、index.html 引用新 bundle，但容器 `assets/` 里**同时存在新旧两个 bundle**（如 `index-0DUtWkTw.js` 新 + `index-DL8nbbnM.js` 旧）。
+- **根因**：`docker cp` 是**覆盖/新增**语义，不删除目标目录里源目录没有的文件。Vite 每次 build 生成 content-hash 文件名（`index-<hash>.js`），新 build 的 hash 与旧的不同 → 旧 bundle 永远不会被 cp 删除，逐次堆积。index.html 虽已指向新 hash，但旧文件残留占用空间、且易误导排查（以为还在用旧版）。
+- **修复**：cp 后手动删旧 bundle，或先清空 assets 再 cp：
+  ```bash
+  # 方式 A：删旧 hash 文件（保留 index.html 已引用的）
+  docker exec <容器> sh -c 'rm -f /usr/share/nginx/html/assets/index-*.js /usr/share/nginx/html/assets/index-*.css'
+  docker cp /tmp/fe_new/. <容器>:/usr/share/nginx/html/
+  # 方式 B：先清空整个 html 再 cp（更彻底）
+  docker exec <容器> sh -c 'rm -rf /usr/share/nginx/html/*'
+  docker cp /tmp/fe_new/. <容器>:/usr/share/nginx/html/
+  docker exec <容器> nginx -s reload
+  ```
+- **验证**：`docker exec <容器> ls /usr/share/nginx/html/assets/` 只剩新 hash；`curl http://localhost/ | grep -o 'index-[A-Za-z0-9]*.js'` 与本地 `dist/assets/` 文件名一致。
+- **原则**：用 `docker cp` 增量更新 hash 命名的静态资源时，**必须先清理旧 assets**，否则旧 bundle 永久残留。这条与 #17（docker build 缓存）互补：#17 讲 build 层缓存，本条讲 cp 不删除旧文件。
+
