@@ -389,6 +389,68 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **验证**：部署前后 `docker ps` 看 backend 容器的 `Status` 的 `Up X days` 不变（没重启），`docker logs backend --tail 5` 无 `[vLLM] 开始加载` 日志。
 - **原则**：docker-compose 增量部署时，`up -d <服务名>` 是安全的，只动该服务。但 `build --no-cache` 不带服务名会重建全部镜像（慢），**务必带服务名** `docker-compose build --no-cache frontend`。
 
+### 27. nginx 不给 index.html 设 no-cache，浏览器缓存旧版导致部署"不生效"
+
+- **标签**：`nginx` `cache` `index.html` `前端部署` `浏览器缓存`
+- **现象**：远程容器里文件是最新的（`docker exec` 查 JS bundle hash 正确），`curl` 返回的 index.html 引用的也是新 bundle。但用户浏览器里**始终是旧版**——功能不生效、字体没变小。用户清缓存、开无痕窗口都不行（因为 nginx 没设 no-cache，浏览器默认缓存 index.html）。
+- **根因**：nginx 默认不给 `index.html` 设 `Cache-Control` 头。虽然 Vite 给 assets 文件名带 hash（`index-Abc123.js`），但 `index.html` 本身没 hash——浏览器缓存了旧的 `index.html`，它引用的旧 bundle hash 已被 `rm -rf assets/*` 删除，浏览器加载的还是旧代码或 404 后 fallback。
+- **修复**：nginx 配置加 `location = /index.html { add_header Cache-Control "no-cache, no-store, must-revalidate"; }`。assets 可保持长缓存（hash 变了自动失效）。
+- **教训**：前端部署后只验证 `curl` 返回 200 +正确 hash 是**不够的**——还要确保浏览器不会缓存 `index.html`。这是部署验证的必要步骤，不是可选步骤。
+
+### 28. contenteditable chip 的 ⌄ 按钮只在创建时添加，状态转换后丢失（状态转换遗漏 bug）
+
+- **标签**：`contenteditable` `chip` `状态转换` `DOM 重建` `前端`
+- **项目**：`D:\project\2026\hungry_arit\ollama_vlm_benchmark\frontend\src\App.tsx`
+- **现象**：contenteditable 编辑器里的词条 chip 应该有 ⌄ 按钮点开下拉列表。但所有 chip 都**没有 ⌄ 按钮**，截图直接暴露了这个问题。
+- **根因**：⌄ 按钮只在 chip **首次创建**时添加（`if (!el)` 分支），但 chip 创建时 marker 处于 `busy`（识别中）状态，`if (!m.busy && !m.error)` 为 false，跳过了添加 ⌄。等识别完成 marker 变成 ready，chip 已存在走 `else` 分支只更新文字内容，**永远不补 ⌄ 按钮**。
+- **这是一个"状态转换遗漏"bug**：只考虑了创建时的静态状态，没有考虑 `busy → ready` 的动态转换。创建时 busy → 没 ⌄；转换后 ready → 也没人补 ⌄。
+- **修复**：把 ⌄ 按钮的添加从"创建时一次性"改为"每次更新都检查"：
+  ```js
+  // 每次 renderEditorChips 都检查
+  const hasArrow = el.querySelector('.chip-arrow')
+  if (!m.busy && !m.error && !hasArrow) {
+    // 补上 ⌄ 按钮
+  }
+  if ((m.busy || m.error) && hasArrow) {
+    hasArrow.remove()  // busy/error 时移除
+  }
+  ```
+- **教训**：
+  1. 动态状态（busy→ready、loading→done）的 UI 元素，**不能只在创建时一次性决定渲染什么**，必须每次更新都检查"当前状态应该有什么、缺什么就补、多了就删"
+  2. 用户说"没有下拉"时，应该**第一时间看实际渲染的 DOM**（截图/远程检查），而不是猜代码逻辑。我在这个问题上猜了 3 轮（先猜时序、再猜缓存、最后才看截图发现 ⌄ 根本不存在）
+
+### 29. ⌄ 按钮 click + setTimeout mousedown 时序冲突，下拉"出现就消失"
+
+- **标签**：`contenteditable` `事件时序` `mousedown` `click` `下拉列表`
+- **现象**：点 ⌄ 按钮展开下拉列表，下拉"出现了一瞬间又消失"。第三个 chip 尤其明显。
+- **根因**：⌄ 按钮用 `click` 事件打开下拉，同时 `setTimeout(() => { document.addEventListener('mousedown', onDown) }, 0)` 注册外部关闭监听器。但**点击 ⌄ 按钮的 mousedown 事件先于 click 触发**，冒泡到 document 时 `setTimeout` 里的监听器可能已注册（或时序接近），判定 `dd.contains(target)` 为 false（⌄ 按钮不在下拉容器里），**立即关闭了刚打开的下拉**。
+- **修复**：
+  1. ⌄ 按钮加 `mousedown` 事件 `e.stopPropagation()`，在 mousedown 阶段就拦住冒泡
+  2. `setTimeout` → `requestAnimationFrame`，更可靠的延迟
+  3. 外部关闭判断排除 `.chip-arrow`：`!(ev.target).closest('.chip-arrow')`
+- **教训**：`click` + `setTimeout(mousedown)` 的组合有时序竞争。如果需要"点按钮打开浮层 + 点外部关闭"，按钮本身必须在 `mousedown` 阶段 `stopPropagation`，否则打开和关闭会打架。
+
+### 30. 改造交互方案时丢旧功能（contenteditable 改造丢了下拉列表）
+
+- **标签**：`改造` `功能丢失` `contenteditable` `红线`
+- **现象**：把 textarea + 标签区改造成 contenteditable 富文本编辑器后，词条的**下拉列表功能整个丢了**（切换/编辑/添加/删除词条）。chip 变成了纯文本，没法操作词条。
+- **根因**：改造时只关注新功能（contenteditable 整体删除），没列旧功能清单逐个确认新方案保留。EditableSelect 组件的代码虽然还在，但渲染位置从"独立标签区"移到了 contenteditable 内部，而 contenteditable 内部不能直接渲染 React 组件，导致功能丢失。
+- **教训**：
+  1. **改造前先列旧功能清单**，逐个确认新方案如何保留
+  2. 改造后**逐个验证旧功能**，而不是只测新功能
+  3. 这违反了 debug-expert 红线 #20（禁止为解决问题牺牲已有功能）的变体——不是主动牺牲，而是改造时遗漏
+
+### 31. 部署后只验证 HTTP 200，没验证核心交互功能
+
+- **标签**`部署验证` `功能验证` `前端`
+- **现象**：多次部署后只 `curl` 验证 HTTP 200 + bundle hash 正确，就报告"部署完成"。但用户打开浏览器发现功能不生效。
+- **根因**：部署验证只检查了"文件到位"，没检查"功能正常"。HTTP 200 只说明 nginx 在服务文件，不说明 JS 代码逻辑正确、DOM 渲染正确。
+- **修复**：部署后验证清单应包括：
+  1. ✅ HTTP 200 + bundle hash（文件到位）
+  2. ✅ index.html 有 no-cache 头（浏览器不缓存旧版）
+  3. ✅ 核心交互功能可用（如果有条件用 Playwright/curl 验证 DOM 结构）
+- **教训**：部署验证 ≠ 文件验证。"部署完成"的判定标准必须是"功能可用"，不是"文件到位"。
+
 ### 26. docker cp 覆盖 nginx html 不删旧 assets，残留旧 bundle
 
 - **标签**：`deploy` `docker-cp` `nginx` `vite` `前端增量`
