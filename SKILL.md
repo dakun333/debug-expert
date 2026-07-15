@@ -353,131 +353,39 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **涉及文件**：`C:\Users\EDY\feishu-bot\ai_daily_report.py` — `summarize_papers()` 和 `summarize_news()` 函数
 - **教训**：批处理调用 LLM 时，`max_tokens` 必须根据批量大小乘以单条输出预估来计算，不能只按「感觉够用」来设。10 篇 × 150 字中文 × 3 tokens/字 ≈ 4500 tokens，加上 JSON 格式开销和 prompt 说明，至少需要 6000-8000 tokens 才安全。
 
-### 24. vLLM offline `LLM.chat` 非线程安全 → 多请求并发进入 EngineCore 死锁
+### 24. deploy.sh 在远程服务器失败：`docker compose`（无横杠）命令不存在 + 本地无 rsync
 
-- **标签**：`vllm` `threading` `deadlock` `offline-api` `LLM.chat` `run_in_executor`
-- **现象**：前端并发发起多个 VLM 推理请求（用户连续点击），后端 hang，`GPU 利用率 0% 但显存占用满`，请求 120s 都不返回。`py-spy dump` 显示多个 `ThreadPoolExecutor` 线程都卡在 `llm.chat` → `_run_engine` → `get_output` → `wait(threading.py:355)`。
-- **根因**：vLLM 的 offline entrypoint `LLM` 类**非线程安全**。多个线程同时调 `self._llm.chat(...)` 会让内部 EngineCore 的输出 queue 状态混乱、互相等对方的 output 而永远拿不到，形成死锁。asyncio 侧 `await run_in_executor(None, self._chat_blocking_batch, ...)` 会用默认 ThreadPool，请求一多就同时进 chat。
-- **触发场景**：前端去掉请求串行化（比如删了 `busyRef`）后连续点击；或后端多个 route 都调 vLLM 的 offline API。
-- **修复**：在封装 vLLM 的 engine 类里加 `threading.Lock`，串行化所有 `LLM.chat` 调用：
-  ```python
-  import threading
-  class LocalVLMEngine:
-      def __init__(self, ...):
-          self._llm_lock = threading.Lock()
-      def _chat_blocking_batch(self, ...):
-          with self._llm_lock:
-              outputs = self._llm.chat(all_openai, **chat_kwargs)
-  ```
-- **验证方法**：3 个并发 request 同时打过来，应全部 200，每个耗时约 `N * 单次推理时长`（串行执行）。之前是 hang 死到超时。
-- **诊断技巧**：进程 hang 时 `docker exec <backend> py-spy dump --pid 1 | tail -80`，看是不是多个线程都卡在同一个 vLLM 内部函数。
-- **相关**：若真需要并发吞吐，改用 vLLM 的 `AsyncLLMEngine`（原生支持并发调度）而不是 offline `LLM`。
-- **涉及文件**：`ollama_vlm_benchmark/backend/app/vlm_engine.py` — `_chat_blocking` / `_chat_blocking_batch`
-
-### 25. gpt-image-2 走 /v1/images/edits（不是 chat/completions），且 stargate 上 deployment 挂着
-
-- **标签**：`stargate` `llm-gateway` `gpt-image-2` `openai-image-api` `images-edits` `multipart`
-- **正确使用方法**（[OpenAI 官方文档](https://developers.openai.com/api/docs/guides/image-generation) 明确写"There is no support in Chat Completions"）：
-  - **纯文本生图** → `POST /v1/images/generations`：`{"model":"gpt-image-2","prompt":"..."}`
-  - **文本 + 图片输入**（refine 场景要用这个） → `POST /v1/images/edits` **multipart/form-data**：
-    ```python
-    httpx.post(f"{gateway}/v1/images/edits",
-      headers={"Authorization": f"Bearer {KEY}"},
-      files={"image": ("in.png", png_bytes, "image/png")},  # 可多个
-      data={"model": "gpt-image-2", "prompt": "..."})
-    # 返回 {"data":[{"b64_json":"..."}]}
-    ```
-  - **另一路径**：Responses API 的 `image_generation` 工具（需 gpt-5.5 mainline 调，多轮编辑用）
-- **错误的走法**（会返 400 "AzureException - The requested operation is unsupported"）：把 gpt-image-2 塞进 `/v1/chat/completions` 的 model 字段。第一次踩这个坑是因为直接沿用 gemini image-preview 系列的 chat/completions 流程。
-- **stargate 当前实际状态**（2026-07 实测）：
-  - GET `/v1/images/edits` → 405（路由注册了，只允许 POST）
-  - POST `/v1/images/edits` + `model=gpt-image-2` → **有时返 429**（"No deployments available, cooldown"）→ **有时返 404**（"AzureException - Resource not found"）
-  - 说明：LiteLLM 注册了 gpt-image-2 model group，但 Azure 后端部署当前不可用（endpoint 路径可能没配对）。**这是网关运维问题**，客户端代码无法解决。
-- **实用建议**：要在 refine 面板暴露 gpt-image-2，需要 (1) `stargate_client.py` 加 `image_edit(image_bytes, prompt, model)` 走 multipart POST，(2) `main.py` refine 端点按 model 分派：gemini 走 chat/completions、gpt-image-2 走 images/edits。**当前 stargate deployment 挂着，先在前端下拉里移除该选项**，等运维修好再放回来。
-- **可读图+可生图的候选（stargate 实测可用）**：只有 `gemini-3.1-flash-image-preview` 和 `gemini-3-pro-image-preview` 能走 chat/completions + `modalities=["image"]`。其它 gemini (`gemini-3-flash-preview` / `gemini-3.5-flash` / `gemini-3.1-pro-preview`) 相同请求返 400 "Vertex_aiException Request contains an invalid argument"。
-- **诊断技巧**：
-  - `curl -X GET <endpoint>` 返 405 = 路由注册了；返 404 = 路由不存在
-  - 429 "No deployments available" = model 注册了但 deployment 冷却/不可用
-  - 400 "operation is unsupported" = 用错端点了（比如把生图模型塞进 chat/completions）
-- **涉及文件**：`ollama_vlm_benchmark/backend/app/stargate_client.py` — 目前只有 `chat_completion`，未实现 `image_edit`
-
-### 26. Qwen3.6-35B（VL）方向判断：#N 稳、裸数字飘 + 推理任务用低 temperature
-
-- **标签**：`vllm` `qwen3-vl` `text-reasoning` `sampling` `temperature` `prompt-preprocess`
-- **场景**：用本地 Qwen3.6-35B-VL 做"把 user_text 按 marker 分解"这类**纯文本推理**任务时，用户输入`"把 2 和 3 的位置互换"`或`"1换成2的样子"`，VLM 输出的方向经常反（把目标当来源、来源当目标）。同一 prompt 多次跑结果还会飘。
-- **两个独立原因**（都要修才稳）：
-  1. **默认采样含 presence_penalty**：Qwen 官方通用推荐 `temperature=0.7, top_p=0.8, presence_penalty=1.5` 对识别/写作 OK，但推理任务**方向判断**会不稳定。
-     - 修（最终版）：`temperature=0.7, top_p=0.8, top_k=20, min_p=0.0, presence_penalty=0, seed=固定值`
-     - **temperature 别调太低**（0.1 那种）：会让"错的地方永远错"，seed 会锁死错误答案。0.6-0.7 才能让模型正常思考
-     - **presence_penalty 一定要清 0**：推理任务需要复用 few-shot 例子里的关键词（"变成 #X 的样子"），高 penalty 让模型规避这些 token 反而误伤
-     - **seed 固定**：可复现（同一输入 3 次跑结果完全一致），方便调试和 few-shot 迭代
-  2. **裸数字方向识别弱**：Qwen3.6-VL 对 `#3` 这种明确 marker 格式方向识别 100% 稳定，对`"3"`裸数字经常把"X 换成 Y"里的 X/Y 角色搞反。
-     - 修：**预处理 user_text，把 1..N 范围的裸数字自动补 # 前缀**，然后再送 VLM。
-     - 正则：`re.sub(r'(?<![\d#])(\d+)(?!\d)', lambda m: f'#{n}' if 1<=int(m.group(1))<=N else m.group(0), text)`
-     - 边界：`(?<![\d#])` 防 `#3` 被匹配、`(?!\d)` 防 `10` 被拆成 `1`；范围限制 `1..N` 避免"10 个红色"这种数量描述误伤。
-- **测试记录**（Qwen3.6-35B AWQ / 4 个 marker）：
-  - 修前：6 场景 4 通过，多 clause 复合场景 100% 错
-  - 只降 temperature：6 场景 5 通过（三重循环仍反）
-  - 降 temperature + 数字预处理：6 场景 6 通过、3 次结果几乎一致
-- **教训**：当 LLM 在**逻辑推理任务**上表现飘时，先怀疑：
-  1. 采样参数是不是"通用/写作"配置（temp 0.7、有 penalty）？推理要低温 + 无 penalty + 固定 seed
-  2. 输入格式是不是有"歧义符号"（裸数字、代词）？把它们规范化到显式格式（#N、明确名字）
-  这两点搞对，弱模型也能达到强模型的效果。别急着换模型。
-- **相关**：vLLM `SamplingParams` 支持所有关键参数（seed、min_p、structured_outputs 等），通过 `sampling_override` 参数覆盖默认 `_chat_blocking_batch` 里的值
-- **涉及文件**：`ollama_vlm_benchmark/backend/app/main.py` `_normalize_marker_refs` + `_decompose_user_text_per_marker`；`vlm_engine.py` `chat_with_images_batch` 的 `sampling_override` 参数
-
-### 27. 整理 session 汇总文档时漏掉 context 压缩前的内容
-
-- **标签**：`session` `context-compact` `documentation` `transcript` `summary`
-- **现象**：用户让我把整个 session 的对话内容整理成汇总文档，我基于当前 context 里看到的内容写完后，用户反馈"不全啊，session 的起初不是这个原因"。我把 session 中后段的一个具体 bug（vLLM 死锁 hang）当成了 session 起点，实际真正起点是 4 天前修复另一个旧项目的 GPU OOM 崩溃。
-- **根因**：Claude Code 的 session context **压缩机制**（context compact）。session 变长后，早期对话会被压缩成 summary（原始 message 内容不再保留在 context 里）。我进入 context 时看到的是「最后一次 compact 的 summary + 后续未压缩的原始对话」，如果之前有多次 compact，就只能看到最后一段。此案例 session 共 152 turns，被压缩了 2 次（Turn 66、Turn 129），我进入时只看到 Turn 130+ 的原始对话。
-- **识别 context 压缩的信号**：conversation 里出现这段 **continuation summary 标记**：
-  ```
-  This session is being continued from a previous conversation that ran out of context.
-  The summary below covers the earlier portion of the conversation.
-  Summary:
-  1. Primary Request and Intent: ...
-  2. Key Technical Concepts: ...
-  ...
-  If you need specific details from before compaction, read the full transcript at:
-  C:\Users\EDY\.claude\projects\<session_prefix>\<session_id>.jsonl
-  ```
-  见到这个标记就说明**前面部分已被压缩**，写"整个 session 总结"时不能只靠 context 里看到的。
-- **修复流程**（每次写 session 总结前的必做步骤）：
-  1. **先扫 continuation 标记**：在 context 里 grep `"This session is being continued from"` 或 `"ran out of context"`。有 → 需要读 JSONL。
-  2. **定位 JSONL 路径**：`C:\Users\EDY\.claude\projects\<session_prefix>\<session_id>.jsonl`。session_id 可以从 continuation 消息末尾的 `read the full transcript at:` 拿。
-  3. **用 Python 抽取所有 user turn**（不能一次 Read 整个 JSONL，可能 35MB+）：
-     ```python
-     import json
-     with open(jsonl_path, encoding='utf-8') as f:
-         for line in f:
-             obj = json.loads(line)
-             if obj.get('type') != 'user': continue
-             content = None
-             if 'message' in obj:
-                 c = obj['message'].get('content')
-                 if isinstance(c, str): content = c
-                 elif isinstance(c, list):
-                     content = '\n'.join(x.get('text','') for x in c if isinstance(x,dict) and x.get('type')=='text')
-             if not content or content.startswith(('<','Caveat:','[Request','[Image')): continue
-             if 'system-reminder' in content[:200] or 'tool_use_id' in content[:200]: continue
-             # write content
+- **标签**：`deploy` `docker-compose` `rsync` `windows` `远程部署`
+- **项目**：`D:\project\2026\hungry_arit\ollama_vlm_benchmark\deploy.sh` → 远程 `root@10.60.0.26:/opt/ollama_vlm_benchmark`
+- **现象**：直接跑 `deploy.sh` 部署失败，两个独立问题：
+  1. 本地 Git Bash 报 `rsync: command not found` —— Windows Git Bash 默认不带 rsync
+  2. 远程 `docker compose version` 报 `docker: unknown command: docker compose` —— 远程 docker 老版本不认 v2 插件语法
+- **根因**：
+  1. `deploy.sh` 用 `rsync` 同步代码，但 Windows Git Bash 环境无 rsync（参见 #8 两套 shell 差异）
+  2. `deploy.sh` 写的是 `docker compose`（v2 插件，无横杠），远程服务器只装了 `docker-compose`（v1 风格，带横杠）。注意：远程 `docker-compose` 实际版本可能是 v2.32.0（新版本号但旧命令名），**命令名必须带横杠**
+- **修复**：
+  1. **不用 rsync**，改用 `tar | ssh` 管道传文件（Git Bash 自带 tar）：
+     ```bash
+     cd 项目根目录
+     tar --exclude='node_modules' --exclude='dist' -czf - -C frontend . \
+       | ssh root@10.60.0.26 "mkdir -p /opt/xxx/frontend && cd /opt/xxx/frontend && tar -xzf -"
      ```
-  4. **按用户 turn 梳理阶段**：真实用户消息才是需求节点，assistant 输出和 tool_result 都是过程，不要用后者划分阶段
-  5. **写"整个 session"级别的文档时必须覆盖 Turn 1 起**：如果有 compact，必须把压缩前的部分从 JSONL 补回来
-- **JSONL message 结构要点**：
-  - `type: "user"` 是用户消息（**不是** `type: "message"` 且 `role: "user"`；后者已过时）
-  - `type: "assistant"` 是模型回复
-  - `type: "tool_use"` / `type: "tool_result"` 是工具调用/结果，不算 user turn
-  - `type: "text"` / `type: "thinking"` 也不算 user turn
-  - user turn 的 content 可能是纯 string，也可能是 list of content blocks（含 tool_result、image、text 等）
-  - 过滤系统消息：以 `<`、`Caveat:`、`[Request`、`[Image` 开头的、或含 `system-reminder`/`tool_use_id` 的 200 字符前缀
-- **不该做的**（此案例的教训）：
-  - **不该**：只看 context 里能看到的就写 session 总结（会遗漏所有已压缩的历史）
-  - **不该**：把 compact summary 里"最近的一个 bug"当成 session 起点
-  - **不该**：假设 project 目录一直是同一个（此案例中 session 里从旧项目 pivot 到全新项目，if 只看后半段就不知道 pivot 存在）
-- **诊断技巧**：
-  - `wc -l <jsonl>` 看总消息数（此案例 9529 行）
-  - `head -50 <jsonl> | grep -o '"type":"[^"]*"' | sort | uniq -c` 看 message 类型分布
-  - `python -c "import json; [print(json.loads(l).get('type')) for l in open(...).read().splitlines()[:20]]"` 看前 20 条 type
-- **涉及文件**：`C:\Users\EDY\.claude\jobs\<job>\tmp\extract_user_turns.py`（可复用的抽取脚本）；`D:\project\2026\vlm_project_docs\why_summary_incomplete.md`（此案例复盘）
+  2. **远程用 `docker-compose`（带横杠）**，不用 `docker compose`：
+     ```bash
+     ssh root@10.60.0.26 "cd /opt/xxx && docker-compose build --no-cache frontend && docker-compose up -d frontend"
+     ```
+- **只改前端时别用完整 deploy.sh**：`deploy.sh` 会 `docker compose build --no-cache`（无 `--no-cache` 只针对某服务时会重建全部）+ 重启所有服务，导致 backend 重新加载 vLLM 24GB 权重（几十秒~两分钟）。**只改前端时，只重建 frontend 服务**，backend/ollama 保持不动。
+- **原则**：
+  - 部署前先 `ssh` 探测远程：`docker-compose version`（带横杠）、`docker compose version`（无横杠）哪个能用
+  - Windows 本地传文件优先 `tar | ssh`，不依赖 rsync
+  - 增量部署：改哪个服务只重建哪个，避免无谓的 vLLM 重载
+- **验证**：远程 `docker exec frontend容器 ls /usr/share/nginx/html/assets/` 看到 bundle hash 与本地 `npm run build` 产出的 hash 一致，`curl http://localhost/` 返回 200 且引用新 bundle。
+
+### 25. 只重建 frontend 服务时不影响 backend（vLLM 不重载）
+
+- **标签**：`deploy` `docker-compose` `vllm` `增量部署`
+- **现象**：改前端 UI 后部署，担心 `docker-compose up -d` 会让 backend 容器重启 → 本地 vLLM 引擎重新加载 Qwen3.6-35B-A3B-AWQ（22GB 显存权重，加载耗时 30s~2min），期间识别接口不可用。
+- **根因**：`docker-compose up -d <服务名>` 只会重建/重启**指定服务**及其依赖。frontend 不依赖 backend（docker-compose.yml 里 frontend `depends_on: backend`，但 backend 不依赖 frontend），所以单独 `up -d frontend` 不会动 backend。
+- **验证**：部署前后 `docker ps` 看 backend 容器的 `Status` 的 `Up X days` 不变（没重启），`docker logs backend --tail 5` 无 `[vLLM] 开始加载` 日志。
+- **原则**：docker-compose 增量部署时，`up -d <服务名>` 是安全的，只动该服务。但 `build --no-cache` 不带服务名会重建全部镜像（慢），**务必带服务名** `docker-compose build --no-cache frontend`。
+
