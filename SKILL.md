@@ -353,6 +353,19 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **涉及文件**：`C:\Users\EDY\feishu-bot\ai_daily_report.py` — `summarize_papers()` 和 `summarize_news()` 函数
 - **教训**：批处理调用 LLM 时，`max_tokens` 必须根据批量大小乘以单条输出预估来计算，不能只按「感觉够用」来设。10 篇 × 150 字中文 × 3 tokens/字 ≈ 4500 tokens，加上 JSON 格式开销和 prompt 说明，至少需要 6000-8000 tokens 才安全。
 
+### 27. Windows Git Bash curl 内嵌 JSON 请求体可能被 shell 转义破坏
+
+- **标签**：`curl` `json` `git-bash` `windows` `OpenAI-compatible`
+- **现象**：在 Windows Git Bash 中直接用单引号包裹包含嵌套 JSON 的 `curl --data` 请求，远程 OpenAI-compatible 服务返回 `400 There was an error parsing the body`；同一请求改用 PowerShell `ConvertTo-Json` 生成 body 后成功。
+- **根因**：Windows Git Bash / MSYS 环境下，复杂嵌套 JSON 的引号、反斜杠或编码在 shell 传递到 curl 时可能与预期不一致，服务端收到的 body 不是合法 JSON。网络连通性正常时，这种错误优先检查实际发送的 body，而不是误判为模型或接口故障。
+- **修复**：Windows 上测试 OpenAI-compatible JSON 接口优先使用 PowerShell：
+  ```powershell
+  $body = @{ model = '...'; messages = @(...); max_tokens = 1024 } | ConvertTo-Json -Depth 8
+  Invoke-RestMethod -Uri 'http://host/v1/chat/completions' -Method Post -ContentType 'application/json' -Body $body
+  ```
+  或先把 JSON 写入文件，再用 `curl --data-binary @body.json` 发送，避免命令行嵌套转义。
+- **验证**：PowerShell 发送用户提供的 Qwen3.6 请求成功；真实公网图片 URL 与 `data:image/png;base64,...` 两种图片输入均被远程服务接受。
+
 ### 24. deploy.sh 在远程服务器失败：`docker compose`（无横杠）命令不存在 + 本地无 rsync
 
 - **标签**：`deploy` `docker-compose` `rsync` `windows` `远程部署`
