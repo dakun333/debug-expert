@@ -353,19 +353,6 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **涉及文件**：`C:\Users\EDY\feishu-bot\ai_daily_report.py` — `summarize_papers()` 和 `summarize_news()` 函数
 - **教训**：批处理调用 LLM 时，`max_tokens` 必须根据批量大小乘以单条输出预估来计算，不能只按「感觉够用」来设。10 篇 × 150 字中文 × 3 tokens/字 ≈ 4500 tokens，加上 JSON 格式开销和 prompt 说明，至少需要 6000-8000 tokens 才安全。
 
-### 27. Windows Git Bash curl 内嵌 JSON 请求体可能被 shell 转义破坏
-
-- **标签**：`curl` `json` `git-bash` `windows` `OpenAI-compatible`
-- **现象**：在 Windows Git Bash 中直接用单引号包裹包含嵌套 JSON 的 `curl --data` 请求，远程 OpenAI-compatible 服务返回 `400 There was an error parsing the body`；同一请求改用 PowerShell `ConvertTo-Json` 生成 body 后成功。
-- **根因**：Windows Git Bash / MSYS 环境下，复杂嵌套 JSON 的引号、反斜杠或编码在 shell 传递到 curl 时可能与预期不一致，服务端收到的 body 不是合法 JSON。网络连通性正常时，这种错误优先检查实际发送的 body，而不是误判为模型或接口故障。
-- **修复**：Windows 上测试 OpenAI-compatible JSON 接口优先使用 PowerShell：
-  ```powershell
-  $body = @{ model = '...'; messages = @(...); max_tokens = 1024 } | ConvertTo-Json -Depth 8
-  Invoke-RestMethod -Uri 'http://host/v1/chat/completions' -Method Post -ContentType 'application/json' -Body $body
-  ```
-  或先把 JSON 写入文件，再用 `curl --data-binary @body.json` 发送，避免命令行嵌套转义。
-- **验证**：PowerShell 发送用户提供的 Qwen3.6 请求成功；真实公网图片 URL 与 `data:image/png;base64,...` 两种图片输入均被远程服务接受。
-
 ### 24. deploy.sh 在远程服务器失败：`docker compose`（无横杠）命令不存在 + 本地无 rsync
 
 - **标签**：`deploy` `docker-compose` `rsync` `windows` `远程部署`
@@ -483,3 +470,26 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **验证**：`docker exec <容器> ls /usr/share/nginx/html/assets/` 只剩新 hash；`curl http://localhost/ | grep -o 'index-[A-Za-z0-9]*.js'` 与本地 `dist/assets/` 文件名一致。
 - **原则**：用 `docker cp` 增量更新 hash 命名的静态资源时，**必须先清理旧 assets**，否则旧 bundle 永久残留。这条与 #17（docker build 缓存）互补：#17 讲 build 层缓存，本条讲 cp 不删除旧文件。
 
+### 28. Windows 环境下 Bash 的 `/tmp` 路径可能被 Python 解释为 `\\tmp`
+
+- **标签**：`windows` `bash` `tmp` `python` `路径`
+- **现象**：通过 Bash 工具执行 `curl -o /tmp/file` 后，后续 Windows Python 读取 `Path('/tmp/file')` 报 `FileNotFoundError`，实际 Python 将 `/tmp/file` 解析成了 `\\tmp\\file`。
+- **根因**：当前 Bash 调用链实际使用 Windows Python/文件系统语义，POSIX `/tmp` 不一定对应 Bash 的临时目录。
+- **修复**：跨工具传递临时文件时使用 Windows 可访问的绝对路径，或避免落盘，直接通过管道传给 Python；验证路径时先检查 `python -c "import tempfile; print(tempfile.gettempdir())"`。
+- **验证**：远程部署和 API 验证改用管道/HTTP 响应，不再依赖 `/tmp` 文件读取。
+
+### 29. Docker backend 的公网 VLM 出站网络可能与本地电脑不同
+
+- **标签**：`docker` `httpx` `ConnectError` `remote-vlm` `network`
+- **现象**：本地电脑请求 `http://212.64.83.107:8686/v1/models` 成功，但 `10.60.0.26` 上的 backend 容器请求同一地址失败，日志出现 `httpx.ConnectError: All connection attempts failed`，前端切换远程模型后识别接口返回 500。
+- **根因**：远程 VLM 的网络可达性是分环境的；部署服务器到目标公网 IP/端口可能没有出站路由、防火墙或安全组放行。不是模型名、图片格式或前端下拉框问题。
+- **修复**：必须在部署服务器宿主机和 backend 容器内分别测试目标地址；若不可达，放行出站 TCP 8686 或配置路由。业务层应将连接异常转换为明确的 502。
+- **验证**：本次 `10.60.0.26` backend 日志确认异常发生在 `RemoteVLMClient._chat_completion()` HTTP 连接阶段；服务器请求 `http://212.64.83.107:8686/v1/models` 超时，而本地请求成功。
+
+### 30. 远程模型 ready 不能仅由静态配置决定
+
+- **标签**：`remote-vlm` `health` `ready` `model-list`
+- **现象**：模型列表中远程模型显示 ready，但实际点击请求因远程服务不可达返回 500。
+- **根因**：模型列表把远程模型存在配置中直接当成已就绪，没有使用 `/v1/models` 健康探测结果。
+- **修复**：ready 应来自远程健康探测；健康失败时显示不可用，warmup 返回 503，业务调用把底层连接异常转换为明确的 502。
+- **验证**：本次 `/api/health` 返回 `remote_vlm=disconnected`，点击请求日志为 `httpx.ConnectError`。
