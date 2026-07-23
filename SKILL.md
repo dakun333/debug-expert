@@ -493,3 +493,21 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **根因**：模型列表把远程模型存在配置中直接当成已就绪，没有使用 `/v1/models` 健康探测结果。
 - **修复**：ready 应来自远程健康探测；健康失败时显示不可用，warmup 返回 503，业务调用把底层连接异常转换为明确的 502。
 - **验证**：本次 `/api/health` 返回 `remote_vlm=disconnected`，点击请求日志为 `httpx.ConnectError`。
+
+### 31. vLLM 重启后的首次请求包含 lazy JIT 编译延迟，不能当稳定性能
+
+- **标签**：`vllm` `JIT` `Triton` `冷启动` `性能`
+- **现象**：增加 API 模型或修改 backend 后重启服务，用户感觉本地 Qwen3.6 速度明显变慢；服务日志出现 Triton kernel JIT compilation during inference。首次请求可能明显慢于后续请求。
+- **根因**：backend 重启会重新加载 24GB 权重、torch.compile、CUDA graph，并且部分视觉/MoE/采样 kernel 按首次输入形状延迟编译。部署后的前几次请求包含模型冷启动和 lazy JIT 成本。
+- **修复**：部署后等待本地 vLLM `ready=true`，再执行与真实图片/输入形状一致的预热请求；性能对比必须区分冷启动、首次 JIT 和稳定态，不要为解决冷启动删除已有 vLLM 功能。
+- **验证**：本次日志记录 `init engine ... took 101.20 s`，随后出现 `_bilinear_pos_embed_kernel`、`fused_moe_kernel`、`rotary_kernel` 等首次推理 JIT；稳定单请求复测 `server_vlm=845.9ms`。
+
+### 32. vLLM offline LLM.chat 的串行锁造成并发请求排队
+
+- **标签**：`vllm` `LLM.chat` `threading.Lock` `并发` `排队`
+- **现象**：单请求本地 VLM 约 846ms，但 10 并发时平均约 5738ms、P95 约 9150ms，用户会感知点击结果变慢。
+- **根因**：为避免历史 vLLM offline `LLM.chat` 并发死锁，代码使用 `threading.Lock` 包住 `self._llm.chat()`；多个点击请求虽然并发进入 FastAPI，但实际推理串行排队。
+- **修复**：保留锁直到有经过验证的 vLLM batch/AsyncLLMEngine 替代方案；不要直接删除锁。优化应单独设计并发调度和批处理，并做稳定性回归。
+- **验证**：本地模型路由仍是 `qwen3.6:35b -> local_vllm -> QuantTrio/Qwen3.6-35B-A3B-AWQ`，没有切到 Ollama 或远程 API；单请求 845.9ms，10 并发整体约 10.7s。
+
+
