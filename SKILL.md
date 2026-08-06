@@ -510,4 +510,28 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **修复**：保留锁直到有经过验证的 vLLM batch/AsyncLLMEngine 替代方案；不要直接删除锁。优化应单独设计并发调度和批处理，并做稳定性回归。
 - **验证**：本地模型路由仍是 `qwen3.6:35b -> local_vllm -> QuantTrio/Qwen3.6-35B-A3B-AWQ`，没有切到 Ollama 或远程 API；单请求 845.9ms，10 并发整体约 10.7s。
 
+### 33. React 异步回调用闭包捕获的旧序号，导致标记点序号与 UI 显示错位
+
+- **标签**：`react` `闭包` `时序` `marker` `序号` `多图`
+- **项目**：`D:\project\2026\hungry_arit_remote_tagging_service\local_app\frontend\src\MultiImageWorkspace.tsx`
+- **现象**：多图场景快速连续添加标记点后，某标记点（如图片2的5号）识别结果与点击位置不对应；之前无论多少张图序号都正常。
+- **根因**：`finishPointer()` 里 `setImages(renumberImages(...))` 是异步更新 state，随后 `await requestMarkerRecognition(image, marker, ...)` 用的是**闭包捕获的旧 marker**，其 `marker.index` 是添加前算的旧值。`renumberImages` 在 state 更新时重新全局编号；若中间有 marker 增删/图片移动，闭包旧 index 与新 UI 序号不一致。A 收到的 `marker_index` 是旧值，导致识别与位置错位。
+- **加重因素**：基线有 `image.taggingStatus !== 'ready'` 守卫（等 A asset ready 才允许打标，天然序列化）；本次改为前端开关 `taggingEnabled` 后移除了 ready 等待，快速连点更容易触发。
+- **修复**：在 `requestMarkerRecognition` 函数内**从最新 state 读取该 marker 的最新 index**（`images.flatMap(...).find(id)`），而不是用闭包旧 `marker.index`，再传给 A 的 `marker_index`。
+- **验证**：快速连续添加多个标记点，A 返回的 marker_index 与 UI 显示序号一致。
+- **教训**：异步回调（setState + await）中，凡是要传给下游/后端的数据，必须从最新 state 读取，不能用闭包捕获的旧对象字段。
+
+### 34. 改动一个功能时，除非明确相关功能需要修改，否则禁止改动其他已确定功能
+
+- **标签**：`原则` `功能边界` `最小改动` `回归`
+- **现象**：为「直连 A 打标」改造时，移除了既有功能中的 `taggingStatus !== 'ready'` 守卫（改成前端开关），导致标记点序号时序 bug 被触发；该守卫属于「打标就绪等待」这一既有确定功能，本不需要为本次任务修改。
+- **根因**：完成任务时条件反射式地修改了「看起来相关」的既有逻辑，没有先判断该逻辑是否属于本次需求范围。序号/就绪等待是已确定功能，改动它超出了任务边界。
+- **修复原则**：
+  1. 改功能前**列出现有功能清单**，明确本次要改哪些、哪些不动。
+  2. 除非本次需求明确要求修改某既有功能，否则**禁止改动**它。
+  3. 若觉得既有设计不合理，**先提出来和用户讨论**，不擅自改。
+  4. 改动后**回归验证所有既有功能**，不只测新功能。
+- **验证**：本次序号 bug 修复后，多图序号、打标、详情全部回归正常。
+- **红线**：任何改动不得以牺牲既有功能为代价；想保留功能又想改 → 先讨论再动手。
+
 
