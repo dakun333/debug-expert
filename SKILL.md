@@ -554,4 +554,13 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **验证**：整库 23 个测试（含多个 TestClient 会话）全部通过，无 bound-to-loop 报错。
 - **教训**：模块级单例承载 asyncio 原语 + 多 TestClient/pytest 场景，生命周期必须支持跨循环重建；不要假设 Queue/Event 可跨事件循环复用。
 
+### 36. FastAPI `request.form()` 返回 starlette 的 UploadFile，不是 fastapi.UploadFile
+
+- **标签**：`fastapi` `uploadfile` `request.form` `isinstance` `multipart`
+- **现象**：在 FastAPI 端点里 `form = await request.form()` 后遍历 `form.keys()`，用 `isinstance(value, UploadFile)`（从 `fastapi` import）判断文件字段，结果**永远为 False**，multipart 里的图片文件全部被当成普通字段漏掉 → 后续报「缺少文件」。
+- **根因**：`fastapi.UploadFile` 是 `starlette.datastructures.UploadFile` 的**子类**（`issubclass(FU, SU)=True`），但 `request.form()` 返回的是 **starlette** 的实例，`isinstance(starlette实例, fastapi.UploadFile)` 为 False（反向不成立）。这是继承方向问题：用子类去 isinstance 基类实例永远不通过。
+- **修复**：不要依赖 `isinstance(value, fastapi.UploadFile)`，用鸭子类型判断（`hasattr(value, "filename") and hasattr(value, "read")`）或对 `starlette.datastructures.UploadFile` 做 isinstance。
+- **验证**：改成鸭子类型后，multipart 中 `payload` JSON + `marked_1` 图片都能被正确识别；Server A 的 `/api/v1/multi/workflow` 端点测试通过。
+- **教训**：`request.form()` 返回的 UploadFile 用 `from fastapi import UploadFile` 做 isinstance 是常见误判；文件字段识别用鸭子类型最稳。
+
 
