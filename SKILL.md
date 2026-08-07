@@ -534,4 +534,24 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **验证**：本次序号 bug 修复后，多图序号、打标、详情全部回归正常。
 - **红线**：任何改动不得以牺牲既有功能为代价；想保留功能又想改 → 先讨论再动手。
 
+### 35. FastAPI TestClient 多个会话复用模块级 asyncio.Queue/Event → "bound to a different event loop"
+
+- **标签**：`fastapi` `testclient` `asyncio` `event-loop` `queue` `pytest`
+- **现象**：在 Server A（FastAPI + pytest）里给模块级单例增加 asyncio 后台 worker（asyncio.Queue + worker task + asyncio.Event 监控循环）。多个测试函数各开 `with TestClient(app)` 会话，第二个会话起报 `RuntimeError: <Queue at 0x..> is bound to a different event loop` / `<asyncio.locks.Event object ...> is bound to a different event loop`，后台 task 报 `Task exception was never retrieved`。
+- **根因**：asyncio.Queue / asyncio.Event / asyncio.Lock 在 Python 3.10+ 是"首次在某个事件循环中被 await 时绑定"；TestClient 每个会话都跑独立的 portal 事件循环。模块级单例的 Queue/Event 一旦被第一个会话绑定，第二个会话复用时跨 loop 崩溃。
+- **修复**：单例的 `start()` 必须**每次重建** Queue/Event（并取消旧 task、关闭旧连接），再绑定当前运行循环：
+  ```python
+  def start(self):
+      old = self._worker_task
+      self._worker_task = None
+      if old and not old.done():
+          old.cancel()
+      # 关闭旧 sqlite/redis 连接
+      self._queue = asyncio.Queue(maxsize=self.max_queue)   # 重建！
+      self._stop = asyncio.Event()                          # 重建！
+      self._worker_task = asyncio.create_task(self._run_worker())
+  ```
+- **验证**：整库 23 个测试（含多个 TestClient 会话）全部通过，无 bound-to-loop 报错。
+- **教训**：模块级单例承载 asyncio 原语 + 多 TestClient/pytest 场景，生命周期必须支持跨循环重建；不要假设 Queue/Event 可跨事件循环复用。
+
 
