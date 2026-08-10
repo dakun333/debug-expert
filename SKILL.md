@@ -563,4 +563,34 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **验证**：改成鸭子类型后，multipart 中 `payload` JSON + `marked_1` 图片都能被正确识别；Server A 的 `/api/v1/multi/workflow` 端点测试通过。
 - **教训**：`request.form()` 返回的 UploadFile 用 `from fastapi import UploadFile` 做 isinstance 是常见误判；文件字段识别用鸭子类型最稳。
 
+### 37. pnpm 11 `ERR_PNPM_IGNORED_BUILDS`：`pnpm dev` 启动失败，且自动注入 allowBuilds 污染 pnpm-workspace.yaml
+
+- **标签**：`pnpm` `ignored-builds` `vite` `git污染` `pnpm-workspace.yaml`
+- **项目**：`D:\project\2026\gitlab\arti`（Vite + React 19，TuCool）
+- **现象**：
+  1. `pnpm install` 正常完成后报 `[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: @parcel/watcher, @sentry/cli, esbuild, unrs-resolver`
+  2. 直接 `pnpm dev --port 3012` 启动失败：pnpm 在运行前做 deps status check，因 ignored builds 再次调用 `pnpm install` 返回 exit 1，整个命令失败
+  3. 更隐蔽的是：pnpm 11 会自动向 `pnpm-workspace.yaml` **注入**一个 `allowBuilds:` 块，内容是占位符 `set this to true or false`，导致 `git status` 出现该文件被修改——污染工作区，若顺手 commit 就会把垃圾配置带进 gitlab
+- **根因**：pnpm 11 默认拒绝未批准依赖的 postinstall 脚本（安全策略），但会提示并自动写入占位配置；`pnpm dev` 前的 `verify-deps-before-run` 检查把 "ignored builds 状态" 视为依赖未就绪而失败。
+- **修复（不污染 git 的方案）**：绕过 pnpm 直接运行 vite：
+  ```
+  node node_modules/vite/bin/vite.js --port 3012 --open false
+  ```
+  esbuild 二进制在 `.pnpm/@esbuild+win32-x64@0.25.12/node_modules/@esbuild/win32-x64/esbuild.exe`（optionalDeps），即使 postinstall 被忽略也能被 esbuild 主包 fallback 找到，vite 正常工作。
+  若要恢复 `pnpm dev`：先 `pnpm approve-builds` 批准脚本（或手动把 `pnpm-workspace.yaml` 的 `allowBuilds` 改成 `true/false`）。
+- **验证**：vite 以 612ms 启动，`http://localhost:3012/` 返回 200；`git status` 干净。
+- **教训**：Windows 上 git 克隆 + pnpm 项目，"只装依赖不动代码"也会产生工作区改动（pnpm-workspace.yaml 被注入）。跑完 install 后必须 `git status` 检查并还原，或用 node 直接跑 vite 绕开 pnpm 的 build 检查。
+
+### 38. 系统 DNS(1.1.1.1/4.2.2.1) 无法解析公司内网 GitLab 域名，git clone 报 Could not resolve host
+
+- **标签**：`dns` `hosts` `gitlab` `内网域名` `网络`
+- **现象**：`git clone https://git-new.7k7k.com/data/arti.git` 报 `fatal: unable to access ... Could not resolve host: git-new.7k7k.com`。`nslookup` 显示 DNS request timed out（DNS 服务器是 1.1.1.1/4.2.2.1）。但 `ping 223.5.5.5`（阿里 DNS）正常——外网通，只是 DNS 服务器不可用/被墙。
+- **根因**：本机网卡手动配置了 1.1.1.1/4.2.2.1 作 DNS，这两个国外 DNS 在本网络不可达；且 7k7k 是公司域名，公网 DNS（223.5.5.5/114.114.114.114）可解析出 `106.75.6.140`，内网子域名 `git-new-inner.7k7k.com` → `10.9.133.53`。
+- **修复**：
+  1. 用国内 DNS 显式解析：`nslookup git-new.7k7k.com 223.5.5.5`
+  2. 把解析结果写入 hosts：`Add-Content $env:WINDIR\System32\drivers\etc\hosts "106.75.6.140 git-new.7k7k.com"`（需管理员权限；`git-new-inner.7k7k.com` 是 pnpm 依赖 `@fe/auth-tool` 的 git 源，也要一并写入）
+  3. 或永久方案：把网卡 DNS 改成 223.5.5.5
+- **验证**：写 hosts 后 `git clone git@git-new.7k7k.com:data/arti.git` 成功；`ssh -T git@git-new.7k7k.com` 返回 `Welcome to GitLab, @zhangshikun!`
+- **教训**：本机 DNS 配置（1.1.1.1/4.2.2.1）不可靠，凡是遇到 git/curl/npm 报 DNS 解析失败，先用 `nslookup <域名> 223.5.5.5` 确认公网/内网可达性再决定是否改 hosts，不要直接在不能解析的 DNS 上反复重试。hosts 修改是持久性系统改动，完成后应提醒用户考虑换 DNS。
+
 
