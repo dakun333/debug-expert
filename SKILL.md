@@ -593,4 +593,14 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **验证**：写 hosts 后 `git clone git@git-new.7k7k.com:data/arti.git` 成功；`ssh -T git@git-new.7k7k.com` 返回 `Welcome to GitLab, @zhangshikun!`
 - **教训**：本机 DNS 配置（1.1.1.1/4.2.2.1）不可靠，凡是遇到 git/curl/npm 报 DNS 解析失败，先用 `nslookup <域名> 223.5.5.5` 确认公网/内网可达性再决定是否改 hosts，不要直接在不能解析的 DNS 上反复重试。hosts 修改是持久性系统改动，完成后应提醒用户考虑换 DNS。
 
+### 39. Vite dev server 模块转换缓存损坏 → lazy 路由页面白屏崩溃 `TypeError: Cannot convert object to primitive value`
+
+- **标签**：`vite` `react` `lazy` `缓存` `crash` `前端`
+- **项目**：`D:\project\2026\gitlab\arti`（TuCool，Vite 7 + React 19 + pnpm）
+- **现象**：某个懒加载路由页面（如 `/share`）崩溃，浏览器 console 报 `TypeError: Cannot convert object to primitive value`，component stack 最内层是 `at Lazy (<anonymous>)` / `at Suspense`，Vite 服务端日志却**没有编译错误**。直接 `curl http://localhost:3012/src/views/create/share/page.tsx` 返回只有 `"use strict";` 的**空模块（14 字节）**，而同项目其他模块正常（几 KB~几百 KB）。
+- **根因**：长时间运行的 vite dev server 在频繁 HMR 后，其模块图缓存里某个模块的 transform 结果被损坏成空；浏览器 `import()` 拿到空模块 → `React.lazy` 解析不到 `default` export → 抛错白屏。
+- **排查关键线索**：新起一个 vite server 实例（`createServer().transformRequest(url)`）转换同一文件时，抛 `Cannot find package 'babel-plugin-react-compiler' imported from D:\project\2026\gitlab\babel-virtual-resolve-base.js`。注意 babel 解析插件的 base 是 **process.cwd()**：在项目目录（`arti`）下运行转换正常，在上级目录（`gitlab`）运行就失败（上级目录没有 `node_modules`）。这是 cwd 假象，真实 server 的根因是**缓存损坏**而非 cwd。
+- **修复**：重启 dev server。`Get-NetTCPConnection -LocalPort 3012 -State Listen` 找占用 PID → `Stop-Process` → 在项目目录后台重启 `node node_modules/vite/bin/vite.js --port 3012 --open false`（见 #37 绕开 pnpm 的方式）。重启后再 `curl` 该模块 URL，确认返回完整 JS（本例恢复 73KB）。
+- **验证**：`curl` 模块 URL 由 14 字节恢复到完整代码；页面正常渲染。
+- **教训**：dev server 长期运行 + 反复 HMR 后页面莫名白屏崩溃、且服务端日志无报错时，**先 curl 该模块 URL 看返回内容是否异常/为空**，比猜代码快得多；再考虑重启 server。
 
