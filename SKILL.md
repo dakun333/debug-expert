@@ -604,3 +604,16 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **验证**：`curl` 模块 URL 由 14 字节恢复到完整代码；页面正常渲染。
 - **教训**：dev server 长期运行 + 反复 HMR 后页面莫名白屏崩溃、且服务端日志无报错时，**先 curl 该模块 URL 看返回内容是否异常/为空**，比猜代码快得多；再考虑重启 server。
 
+### 40. antd Input 的 className 直接落在最外层元素上，SCSS Module 却写"后代选择器"，导致描边/圆角覆盖不生效
+
+- **标签**：`antd` `input` `css-modules` `scss` `选择器` `border` `样式不生效`
+- **项目**：`D:\project\2026\gitlab\arti`（TuCool，Vite 7 + React 19 + antd v6）
+- **现象**：给 `/share` 页面搜索框改胶囊圆角 + 去掉灰白描边，在 SCSS Module 里写 `.promptFilter :global(.ant-input-affix-wrapper) { border: 0; border-radius: 999px; }`，浏览器里外框样式完全没生效，只有背景变了，一度怀疑改错了页面。
+- **根因**：`className={styles.promptFilter}` 是直接加在 antd Input **最外层元素**上的——而这个最外层元素**就是** `.ant-input-affix-wrapper`（带 prefix/suffix 时 antd 把该 className 渲染到根节点上）。SCSS 写成 `.promptFilter :global(.ant-input-affix-wrapper)`（后代选择器）要求 `.promptFilter` 是 `.ant-input-affix-wrapper` 的**祖先**，但两者是**同一个元素**，规则永不命中；背景生效是因为 `.promptFilter` 自身的 background 声明碰巧命中。
+- **修复**：
+  1. 直接在根元素上写样式，不要后代选择器：`.promptFilter { border: 0 !important; border-radius: 999px !important; }`（className 与 `.ant-input-affix-wrapper` 同元素，直接写根类即可覆盖）
+  2. 要彻底去掉 antd 描边，优先用组件官方属性 `variant='borderless'`（antd v5/v6），比硬抗 CSS-in-JS 干净
+  3. 覆盖 hover/focus 态补 `&:hover, &:focus, &:focus-within`，必要时 `!important`（antd CSS-in-JS 动态注入，普通优先级可能被反超）
+- **验证**：`.promptFilter` 直接设 `border-radius: 999px !important; border: 0 !important; background: #1a1c20 !important;` + `variant='borderless'`，搜索框变胶囊且无描边；`curl http://localhost:3012/src/views/create/share/page.module.scss` 可见编译后的 `._promptFilter_xxx` 规则直接作用于自身。
+- **教训**：给 antd 组件传 `className` 前，先确认该 className 落在哪个 DOM 节点——antd 很多组件（Input/Select 等）会把 className 直接给根节点。SCSS Module 里"同名类 + 全局类"的后代选择器不命中时，改成直接写根类本身，并优先用组件官方 variant 属性。
+
