@@ -617,3 +617,15 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **验证**：`.promptFilter` 直接设 `border-radius: 999px !important; border: 0 !important; background: #1a1c20 !important;` + `variant='borderless'`，搜索框变胶囊且无描边；`curl http://localhost:3012/src/views/create/share/page.module.scss` 可见编译后的 `._promptFilter_xxx` 规则直接作用于自身。
 - **教训**：给 antd 组件传 `className` 前，先确认该 className 落在哪个 DOM 节点——antd 很多组件（Input/Select 等）会把 className 直接给根节点。SCSS Module 里"同名类 + 全局类"的后代选择器不命中时，改成直接写根类本身，并优先用组件官方 variant 属性。
 
+### 41. Windows 下 SQLite 连接未关闭导致 pytest `TemporaryDirectory` 清理报 `PermissionError`
+
+- **标签**：`sqlite` `windows` `pytest` `临时目录` `文件锁` `PermissionError`
+- **项目**：`D:\project\2026\canvas-agent-unified`（Canvas Agent Unified，FastAPI）
+- **现象**：`PYTHONPATH=. pytest -q` 在 Windows 上 4 个用例全挂，报 `PermissionError: [WinError 32] 另一个程序正在使用此文件`，路径指向 pytest `TemporaryDirectory` 里的 `test.db`。README 写「4 passed」是 Linux 沙箱的结果，本机 Windows 却失败——但 HTTP smoke 全过，说明不是业务逻辑问题。
+- **根因**：`Database` 类（`apps/api/app/db.py`）在 `__init__` 里 `sqlite3.connect(...)` 后**从不 close 连接**。Windows 对已打开的文件加锁，`TemporaryDirectory` 上下文退出时删不掉仍被连接的 `test.db`（及其 WAL/shm 文件），报 WinError 32。Linux 允许删除已打开文件，所以 Linux 上不报错——这是纯平台差异。
+- **修复**：
+  1. `Database` 增加 `close()` 方法：`with self._lock: self._conn.close()`（套 try/except 兜底）
+  2. 测试里在 `with TemporaryDirectory() as tmp:` 块内用 `try/finally: db.close()`，确保连接在临时目录清理前释放
+- **教训**：测试里创建了持有文件句柄/连接的对象（sqlite3、打开的文件等）必须显式 close，不能依赖对象被 GC——`__del__` 在 `TemporaryDirectory` 清理前不触发（局部变量仍在栈上，引用计数 >0）。跨平台跑 pytest 时，Windows 的文件锁会让「Linux 能过、Windows 挂」的用例暴露出来。
+- **验证**：`PYTHONPATH=. pytest -q` → `4 passed`；`/api/health` 返回 `{"ok":true,"version":"0.2.0"}`。
+
