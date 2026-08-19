@@ -641,3 +641,25 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
   3. 用真实图执行 `POST /api/capabilities/run`，检查 Job `output.provider == "remote-marker"`；区域标记还应保留 `marker_id`、`bbox` 与 `geometry_support`。
 - **远程协议校准**：该服务的 `/marker/upload` 接受 `file`，同时支持 `original_width`、`original_height`；`/marker/recognize-by-id` 接受 JSON `image_id`、`point_x`、`point_y`、`marker_index`、`instruction` 和可选 `bbox`。
 - **验证**：实际接口探测中 `POST http://117.50.195.214:8100/api/v1/marker/upload` 返回 `image_id`；经 Canvas Agent Job 调用后返回 `status=succeeded provider=remote-marker marker_id=remote-verify-marker bbox_x1=8 geometry=point_with_bbox_context`。
+
+### 43. 删除全局 CSS 类规则时把它"顺带"提供的定位声明也删了 → 后代绝对定位元素失去包含块撑满祖先
+
+- **标签**：`css` `position:absolute` `回归` `marker` `canvas-agent`
+- **项目**：`D:\project\2026\canvas-agent-unified`
+- **现象**：为去掉画布标记点的红色背景，删除了 `styles.css` 里的旧规则 `.tag-pin{position:absolute;...;width:25px;height:25px;...}`。刷新后水滴标记变成巨大的蓝色水滴撑满整张图片节点。
+- **根因**：被删的旧规则恰好是 `.tag-pin` 唯一的 `position:absolute` 声明来源。水滴内部的 svg 是 `.tag-pin svg{position:absolute;inset:0;width:100%;height:100%}`——删除后 `.tag-pin` 变回 static，svg 的绝对定位包含块回退到最近的 positioned 祖先（图片节点），于是撑满整个节点。
+- **修复**：在模块级样式（`marker.css`）补 `.tag-pin{position:absolute;display:block}`，并在审计脚本中加入 `.tag-pin{position:absolute` 静态检查防回退。
+- **教训**：删除"看起来是遗留/错误"的 CSS 类规则前，先检查该类自身的子元素样式（`inset:0`、`absolute` 后代）是否依赖这个类的定位声明；删除后必须在目标模块补回必要定位，并加审计规则。
+
+### 44. overflow:auto 容器内的绝对定位下拉菜单被裁剪不可见 → 改 position:fixed + getBoundingClientRect
+
+- **标签**：`css` `dropdown` `overflow` `clipping` `position:fixed` `canvas-agent`
+- **项目**：`D:\project\2026\canvas-agent-unified`
+- **现象**：共享词条下拉（`.marker-menu`，`position:absolute;bottom:calc(100%+4px)` 向上弹出）在 Agent 面板里看不见/点不到。
+- **根因**：菜单定位参考 `.marker-card`（`position:relative`），但祖先 `.marker-context{max-height:112px;overflow:auto}` 是滚动容器，向上弹出的菜单被 `overflow` 裁剪。absolute 后代只要包含块在滚动容器内部就会被裁剪。
+- **修复**：
+  1. `.marker-menu{position:fixed}`（祖先无 transform/filter 时 fixed 脱离所有 overflow 裁剪）
+  2. 打开时用 `event.currentTarget.closest('.marker-card').getBoundingClientRect()` 计算视口坐标写入内联 style；向上弹用 `transform:translateY(-100%)`
+  3. 防溢出：`rect.top < 262` 时改为向下弹（`top=rect.bottom+4`、无 transform）
+  4. 补外部点击关闭：document `pointerdown` 监听，`closest('.marker-menu')/.marker-menu-trigger` 之外即关闭（触发器自身 `onPointerDown stopPropagation`）
+- **教训**：在 `overflow:auto/hidden` 的容器内做弹出层（下拉、tooltip、popover），不要用 absolute 贴父元素；直接用 fixed + 矩形坐标，或 portal 到 body。注意祖先若有 `transform`/`filter`/`will-change` 会成为 fixed 的包含块使 fixed 失效。
