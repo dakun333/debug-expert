@@ -663,3 +663,20 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
   3. 防溢出：`rect.top < 262` 时改为向下弹（`top=rect.bottom+4`、无 transform）
   4. 补外部点击关闭：document `pointerdown` 监听，`closest('.marker-menu')/.marker-menu-trigger` 之外即关闭（触发器自身 `onPointerDown stopPropagation`）
 - **教训**：在 `overflow:auto/hidden` 的容器内做弹出层（下拉、tooltip、popover），不要用 absolute 贴父元素；直接用 fixed + 矩形坐标，或 portal 到 body。注意祖先若有 `transform`/`filter`/`will-change` 会成为 fixed 的包含块使 fixed 失效。
+
+### 45. Canvas Agent `Database` 有表名白名单，新增持久化桶必须同步建表+放行
+
+- **标签**：`canvas-agent` `sqlite` `database` `白名单` `unsupported table`
+- **项目**：`D:\project\2026\canvas-agent-unified`
+- **现象**：新增 workflow 目录缓存（`WorkflowService` 用 `db.put_json('workflow_catalog', ...)`）后，`GET /api/workflows/catalog` 报 500，traceback 末尾 `ValueError: unsupported table`。
+- **根因**：`app/db.py` 的 `Database._check` 只放行 `{'canvases','artifacts','jobs'}`；`_init` 也只建这三张表 + trajectories。任何新的 `put_json` 桶名都会先被白名单拦下。
+- **修复**：`_init` 的 executescript 里 `CREATE TABLE IF NOT EXISTS <新桶> (id TEXT PRIMARY KEY, data_json TEXT NOT NULL, updated_at ...)`，并把桶名加进 `_check` 白名单，两处都要改。
+- **教训**：在该项目用 `db.put_json/get_json` 引入新数据桶时，永远同时改 `_init` 建表与 `_check` 白名单，缺一即运行时 500。
+
+### 46. Bash 工具内 `Start-Process` 后台服务会被 `ChildProcess.kill` 回收
+
+- **标签**：`powershell` `start-process` `后台进程` `uvicorn` `工具行为`
+- **项目**：`D:\project\2026\canvas-agent-unified`（重启 8000 端口 API）
+- **现象**：在 bash 工具命令里 `Start-Process python -m uvicorn ... -RedirectStandardOutput/-Error`，命令返回 `Unknown: ChildProcess.kill`，看似启动失败。
+- **根因**：工具会追踪命令派生的子进程并在命令结束时尝试清理，`Start-Process` 拉起的 uvicorn 被当作子进程回收（但有时实际存活）。
+- **正确做法**：不要以返回码判断成败；启动后单独执行 `Get-NetTCPConnection -LocalPort 8000 -State Listen` 确认监听 PID，再 `Invoke-WebRequest` 打健康/业务接口验证。进程确实在跑就忽略 kill 报信息。
