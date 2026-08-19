@@ -629,3 +629,15 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **教训**：测试里创建了持有文件句柄/连接的对象（sqlite3、打开的文件等）必须显式 close，不能依赖对象被 GC——`__del__` 在 `TemporaryDirectory` 清理前不触发（局部变量仍在栈上，引用计数 >0）。跨平台跑 pytest 时，Windows 的文件锁会让「Linux 能过、Windows 挂」的用例暴露出来。
 - **验证**：`PYTHONPATH=. pytest -q` → `4 passed`；`/api/health` 返回 `{"ok":true,"version":"0.2.0"}`。
 
+### 42. Canvas Agent 本地 `.env` 仍是 mock provider，前端功能完成但远程标记接口不会被调用
+
+- **标签**：`canvas-agent` `marker` `provider` `.env` `mock` `remote` `配置`
+- **项目**：`D:\project\2026\canvas-agent-unified`
+- **现象**：前端 marker UI 已发送 `/api/capabilities/run`，后端 Job 也成功完成，但返回 `provider=mock` 和本地固定文案，用户认为「标记点接口没通」。
+- **根因**：项目的本地 `apps/api/.env` 明确配置 `MARKER_PROVIDER=mock`；README/.env.example 中虽然提供了远程地址 `http://117.50.195.214:8100/api/v1`，但示例配置不会自动覆盖已有本地 `.env`。重启前进程也不会重新读取环境变量。
+- **修复**：
+  1. 将 `apps/api/.env` 设置为：`MARKER_PROVIDER=remote`、`MARKER_BASE_URL=http://117.50.195.214:8100/api/v1`。
+  2. 完整重启 API 进程，让 `Settings` 和 capability registry 按新配置重建。
+  3. 用真实图执行 `POST /api/capabilities/run`，检查 Job `output.provider == "remote-marker"`；区域标记还应保留 `marker_id`、`bbox` 与 `geometry_support`。
+- **远程协议校准**：该服务的 `/marker/upload` 接受 `file`，同时支持 `original_width`、`original_height`；`/marker/recognize-by-id` 接受 JSON `image_id`、`point_x`、`point_y`、`marker_index`、`instruction` 和可选 `bbox`。
+- **验证**：实际接口探测中 `POST http://117.50.195.214:8100/api/v1/marker/upload` 返回 `image_id`；经 Canvas Agent Job 调用后返回 `status=succeeded provider=remote-marker marker_id=remote-verify-marker bbox_x1=8 geometry=point_with_bbox_context`。
