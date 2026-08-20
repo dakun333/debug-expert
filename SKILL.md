@@ -680,3 +680,4 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **现象**：在 bash 工具命令里 `Start-Process python -m uvicorn ... -RedirectStandardOutput/-Error`，命令返回 `Unknown: ChildProcess.kill`，看似启动失败。
 - **根因**：工具会追踪命令派生的子进程并在命令结束时尝试清理，`Start-Process` 拉起的 uvicorn 被当作子进程回收（但有时实际存活）。
 - **正确做法**：不要以返回码判断成败；启动后单独执行 `Get-NetTCPConnection -LocalPort 8000 -State Listen` 确认监听 PID，再 `Invoke-WebRequest` 打健康/业务接口验证。进程确实在跑就忽略 kill 报信息。
+- **追加**：`Start-Process -FilePath` 用相对路径（如 `.\.venv\Scripts\python.exe`）会直接报"找不到指定的文件"，即使给了 `-WorkingDirectory`；`-FilePath` 与重定向路径都必须用绝对路径。
