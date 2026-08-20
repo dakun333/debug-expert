@@ -690,3 +690,15 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **排查口径**：不要只看进程在不在、`npm run build` 过不过（build 是新起进程，永远是新代码）；必须 `Invoke-WebRequest http://localhost:5174/src/<改动文件>` 后 `$Content.Contains('新增标识符')` 验证 dev 服务器真实吐出的内容。
 - **修复**：杀掉 5174 端口进程重启 vite dev（清空 transform 缓存），再让用户 Ctrl+F5 强刷浏览器（浏览器侧 HMR 模块图也可能残留）。
 - **教训**：canvas-agent 项目里只要改完前端就顺手 curl 验证 dev server 输出；出现白屏/缺导出先怀疑 vite 缓存而不是自己代码。
+
+### 48. httpx 默认走 Windows 系统代理，本地 Clash 会劫持公司域名（getaddrinfo failed / 502）
+
+- **标签**：`httpx` `trust_env` `代理` `clash` `dns` `getaddrinfo` `canvas-agent`
+- **项目**：`D:\project\2026\canvas-agent-unified`（工作流网关 `aigc-test.youxi123.com` + OSS 上传/产物下载）
+- **现象**：工作流 job 失败报 `ConnectError: [Errno 11001] getaddrinfo failed`，或 `502 Bad Gateway`；同一请求时好时坏，而 PowerShell `Resolve-DnsName` 与直连 httpx 测试都正常。
+- **根因**：机器开了 Windows 系统代理（HKCU Internet Settings `ProxyServer=127.0.0.1:7897`，Clash）。httpx `trust_env=True`（默认）读系统代理把公司域名流量转发给本地代理；代理状态不稳/DNS 被其 hook 时，报 getaddrinfo failed（DNS 挂）或 502（上游挂）。
+- **修复**：
+  1. 所有出站公司请求用 `httpx.AsyncClient(..., trust_env=False)` 绕过系统代理直连。
+  2. 对 `httpx.ConnectError` 加有限重试（3 次、1s/2s 退避）抗瞬时 DNS 抖动；写接口只在"连接从未建立"（ConnectError）时重试才安全，避免重复建任务。
+  3. 诊断口径：先 `Get-ItemProperty HKCU:\...\Internet Settings` 看 `ProxyEnable/ProxyServer`；同一 URL 分别 `trust_env=True/False` 各打一遍，差异即坐实代理劫持。
+- **教训**：Windows 上 httpx/aiohttp 报 getaddrinfo/502 而命令行解析正常，第一怀疑系统代理劫持而非 DNS 本身；对内网/公司固定域名永远 `trust_env=False` + ConnectError 重试。
