@@ -681,3 +681,12 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **根因**：工具会追踪命令派生的子进程并在命令结束时尝试清理，`Start-Process` 拉起的 uvicorn 被当作子进程回收（但有时实际存活）。
 - **正确做法**：不要以返回码判断成败；启动后单独执行 `Get-NetTCPConnection -LocalPort 8000 -State Listen` 确认监听 PID，再 `Invoke-WebRequest` 打健康/业务接口验证。进程确实在跑就忽略 kill 报信息。
 - **追加**：`Start-Process -FilePath` 用相对路径（如 `.\.venv\Scripts\python.exe`）会直接报"找不到指定的文件"，即使给了 `-WorkingDirectory`；`-FilePath` 与重定向路径都必须用绝对路径。
+
+### 47. Vite dev 服务器会吐出过时的模块（改了源码但浏览器/HTTP 拿到的还是旧代码）
+
+- **标签**：`vite` `hmr` `stale-module` `dev-server` `白屏` `空白页面`
+- **项目**：`D:\project\2026\canvas-agent-unified`
+- **现象**：编辑 `apps/web/src/*.ts(x)` 后，浏览器白屏/报错 `The requested module '/src/api.ts' does not provide an export named 'X'`；直接 HTTP 请求 `http://localhost:5174/src/<file>` 返回的内容也不含新增导出——vite 的 transform 缓存/watcher 漏掉了该次文件变更。
+- **排查口径**：不要只看进程在不在、`npm run build` 过不过（build 是新起进程，永远是新代码）；必须 `Invoke-WebRequest http://localhost:5174/src/<改动文件>` 后 `$Content.Contains('新增标识符')` 验证 dev 服务器真实吐出的内容。
+- **修复**：杀掉 5174 端口进程重启 vite dev（清空 transform 缓存），再让用户 Ctrl+F5 强刷浏览器（浏览器侧 HMR 模块图也可能残留）。
+- **教训**：canvas-agent 项目里只要改完前端就顺手 curl 验证 dev server 输出；出现白屏/缺导出先怀疑 vite 缓存而不是自己代码。
