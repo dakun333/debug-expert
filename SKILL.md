@@ -728,3 +728,13 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **原因**：新 effect 被放在 `if(authState!=='auth')return <div .../>` / `if(!canvas)return` 早返回之后。未登录渲染走早返回不执行该 hook，登录后执行，hook 数量前后不一致 → App 渲染抛错 → 白屏。
 - **修复/约定**：App.tsx 所有 hook 必须位于组件顶部、任何 JSX 早返回之前；新增 hook 先确认早返回位置。`scripts/audit.py` 新增 `check_app_hooks_order`：`if(authState!=='auth')return <div` 之后出现任何 hook 即审计失败。
 - **教训**：审计 needle 要用带 JSX 特征的字符串（`return <div`）——只写 `if(authState!=='auth')return` 会误命中 effect 回调内部的 `return;` 语句导致误报。
+
+### 52. 多用户存储 P1 两个环境坑 —— Starlette 挂载顺序 & settings lru_cache 污染
+
+- **标签**：`fastapi` `starlette` `mount` `pydantic-settings` `测试` `canvas-agent`
+- **项目**：`D:\project\2026\canvas-agent-unified`
+- **现象1**：给 per-user 产物加 `/media/users` 静态挂载时，若写在 `/media` 挂载之后，`/media/users/<uid>/x.png` 会被先注册的 `/media` 前缀匹配截走（去 artifacts 目录找 `users/...`）→ 404。
+- **修复1**：Starlette/FastAPI 的 `app.mount` 按注册顺序前缀匹配，**更具体的前缀必须先注册**：先 `/media/users` 后 `/media`。
+- **现象2**：测试里用 `os.environ['DATA_DIR']=tmp` 想隔离容器数据库，但 pytest 按字母序先 import 了别的测试模块，`get_settings()`（`@lru_cache`）已被真实 `.env` 的 DATA_DIR 缓存 → 容器仍指向开发 `./data`，测试污染真实库。
+- **修复2**：测试模块顶部设完 env 后、import `app.main` 前，必须 `from app.config import get_settings; get_settings.cache_clear()`。
+- **教训**：前缀类路由/挂载永远先具体后宽泛；凡是用 lru_cache 单例读 env 的配置，测试覆盖 env 时要同时清缓存并控制 import 顺序。
