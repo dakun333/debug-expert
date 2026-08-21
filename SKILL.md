@@ -719,3 +719,12 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **原因**：aigc 网关内部状态机竞态——任务实际已跑完，但网关在状态仍为 running 时尝试 complete 而失败。与我方代码、图片格式、代理设置均无关。
 - **修复/约定**：不要为它改代码/换图片格式；把它当瞬时故障——重新执行同一任务通常成功。本项目不自动重试 Job（避免重复生成/计费），失败消息进聊天由用户手动重跑。e2e 脚本（`scripts/e2e_outpaint.py`）遇此错直接再跑一遍。
 - **教训**：网关类服务的 failed 终态要先看 fail_reason 判断是「输入错误」还是「服务端竞态」；偶发的 `from status running` 属于后者，先重跑验证再怀疑自己的参数。
+
+### 51. useEffect 放在 App.tsx 早返回之后导致 React 白屏崩溃 —— hooks 顺序规则
+
+- **标签**：`react` `hooks` `前端` `白屏` `vite` `canvas-agent`
+- **项目**：`D:\project\2026\canvas-agent-unified`
+- **现象**：在 App.tsx 函数体中部新增一个 `useEffect` 后整页白屏（登录前后都白），`vite.err.log` 报 `Rendered more hooks than during the previous render`。
+- **原因**：新 effect 被放在 `if(authState!=='auth')return <div .../>` / `if(!canvas)return` 早返回之后。未登录渲染走早返回不执行该 hook，登录后执行，hook 数量前后不一致 → App 渲染抛错 → 白屏。
+- **修复/约定**：App.tsx 所有 hook 必须位于组件顶部、任何 JSX 早返回之前；新增 hook 先确认早返回位置。`scripts/audit.py` 新增 `check_app_hooks_order`：`if(authState!=='auth')return <div` 之后出现任何 hook 即审计失败。
+- **教训**：审计 needle 要用带 JSX 特征的字符串（`return <div`）——只写 `if(authState!=='auth')return` 会误命中 effect 回调内部的 `return;` 语句导致误报。
