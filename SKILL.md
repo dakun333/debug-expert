@@ -710,3 +710,12 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **现象**：用 `Get-Content -Raw` + `.Contains('中文')` 验证源码改动，全部返回 False，甚至对确定存在的字符串也 False，误以为改动丢失。
 - **根因**：Windows PowerShell 5.1 的 `Get-Content` 默认用系统 ANSI 代码页（GBK）读文件，UTF-8 中文被读成乱码；命令里的中文字面量是 UTF-8，两边不匹配。同理 `Set-Content`/`Add-Content` 不带 `-Encoding UTF8` 会以 ANSI/UTF16 写回破坏文件。
 - **修复/口径**：凡读写含中文的文件一律显式 `-Encoding UTF8`；或改用 ASCII 锚点（标识符、类名）做 Contains 验证；注意 vite/esbuild 交付内容可能把中文转义成 `\uXXXX`，验证 dev server 输出优先用 ASCII 锚点。
+
+### 50. TuCool 网关偶发 `cannot complete comfyui task <id> from status running` —— 瞬时竞态，重跑即过
+
+- **标签**：`comfyui` `workflow` `网关` `瞬时故障` `outpaint`
+- **项目**：`D:\project6\canvas-agent-unified`
+- **现象**：e2e 提交 `outpaint` 工作流任务，后端 Job 轮询到终态 `failed`，fail_reason 为 `cannot complete comfyui task 787 from status running`；**同样输入立刻重跑即成功**。
+- **原因**：aigc 网关内部状态机竞态——任务实际已跑完，但网关在状态仍为 running 时尝试 complete 而失败。与我方代码、图片格式、代理设置均无关。
+- **修复/约定**：不要为它改代码/换图片格式；把它当瞬时故障——重新执行同一任务通常成功。本项目不自动重试 Job（避免重复生成/计费），失败消息进聊天由用户手动重跑。e2e 脚本（`scripts/e2e_outpaint.py`）遇此错直接再跑一遍。
+- **教训**：网关类服务的 failed 终态要先看 fail_reason 判断是「输入错误」还是「服务端竞态」；偶发的 `from status running` 属于后者，先重跑验证再怀疑自己的参数。
