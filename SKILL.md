@@ -702,3 +702,11 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
   2. 对 `httpx.ConnectError` 加有限重试（3 次、1s/2s 退避）抗瞬时 DNS 抖动；写接口只在"连接从未建立"（ConnectError）时重试才安全，避免重复建任务。
   3. 诊断口径：先 `Get-ItemProperty HKCU:\...\Internet Settings` 看 `ProxyEnable/ProxyServer`；同一 URL 分别 `trust_env=True/False` 各打一遍，差异即坐实代理劫持。
 - **教训**：Windows 上 httpx/aiohttp 报 getaddrinfo/502 而命令行解析正常，第一怀疑系统代理劫持而非 DNS 本身；对内网/公司固定域名永远 `trust_env=False` + ConnectError 重试。
+
+### 49. PowerShell 读写含中文文件不带 `-Encoding UTF8` 时字符串匹配全假阴性
+
+- **标签**：`powershell` `编码` `utf-8` `get-content` `中文匹配`
+- **项目**：`D:\project\2026\canvas-agent-unified`
+- **现象**：用 `Get-Content -Raw` + `.Contains('中文')` 验证源码改动，全部返回 False，甚至对确定存在的字符串也 False，误以为改动丢失。
+- **根因**：Windows PowerShell 5.1 的 `Get-Content` 默认用系统 ANSI 代码页（GBK）读文件，UTF-8 中文被读成乱码；命令里的中文字面量是 UTF-8，两边不匹配。同理 `Set-Content`/`Add-Content` 不带 `-Encoding UTF8` 会以 ANSI/UTF16 写回破坏文件。
+- **修复/口径**：凡读写含中文的文件一律显式 `-Encoding UTF8`；或改用 ASCII 锚点（标识符、类名）做 Contains 验证；注意 vite/esbuild 交付内容可能把中文转义成 `\uXXXX`，验证 dev server 输出优先用 ASCII 锚点。
