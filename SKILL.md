@@ -738,3 +738,14 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **现象2**：测试里用 `os.environ['DATA_DIR']=tmp` 想隔离容器数据库，但 pytest 按字母序先 import 了别的测试模块，`get_settings()`（`@lru_cache`）已被真实 `.env` 的 DATA_DIR 缓存 → 容器仍指向开发 `./data`，测试污染真实库。
 - **修复2**：测试模块顶部设完 env 后、import `app.main` 前，必须 `from app.config import get_settings; get_settings.cache_clear()`。
 - **教训**：前缀类路由/挂载永远先具体后宽泛；凡是用 lru_cache 单例读 env 的配置，测试覆盖 env 时要同时清缓存并控制 import 顺序。
+
+### 53. 前端 marks 保存与服务器广播构成无限回环（PUT 风暴）& uv venv 的 python 父子进程对是正常 shim
+
+- **标签**：`react` `websocket` `canvas-agent` `回环` `uv` `windows进程`
+- **项目**：`D:\project\2026\canvas-agent-unified`
+- **现象1**：API 控制台被请求日志刷满；WS 上 `canvas.marks`+`canvas.updated` 每秒成对循环广播；任务面板状态更新被风暴淹没，观感"只有排队中"。
+- **原因1**：前端保存 effect 依赖 `[marks, canvas]`——收到 WS 广播 `setCanvas(新对象)` 又触发保存 PUT；服务端每次 PUT 都广播 → 无限回环。
+- **修复1**：服务端 `set_marks` 幂等（`c.marks==marks` 直接 return 不广播）；前端依赖改 `[marks, canvas?.id]` 并用 `marksPushRef` 做 JSON 内容比对，收到广播不再回 PUT。
+- **现象2**：进程列表里 uvicorn 出现"父子两条相同命令行"，误以为 reload 残留或重复启动。
+- **原因2**：uv 创建的 venv 在 Windows 上 `Scripts\python.exe` 是 shim，会再拉起 base python（uv 缓存里的解释器）执行原参数 → 父子对即一个服务，属正常。
+- **教训**：「保存本地状态」effect 依赖服务器广播的对象引用必成回环；依赖用 id、内容做比对；服务端广播 API 必须幂等（无变化不广播）。排查 Windows 进程先看父子 exe 路径是否不同（uv shim 特征）。
