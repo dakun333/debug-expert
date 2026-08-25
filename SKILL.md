@@ -749,3 +749,11 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **现象2**：进程列表里 uvicorn 出现"父子两条相同命令行"，误以为 reload 残留或重复启动。
 - **原因2**：uv 创建的 venv 在 Windows 上 `Scripts\python.exe` 是 shim，会再拉起 base python（uv 缓存里的解释器）执行原参数 → 父子对即一个服务，属正常。
 - **教训**：「保存本地状态」effect 依赖服务器广播的对象引用必成回环；依赖用 id、内容做比对；服务端广播 API 必须幂等（无变化不广播）。排查 Windows 进程先看父子 exe 路径是否不同（uv shim 特征）。
+
+### 54. 连续多轮 HMR 后 vite 页面白屏/行为陈旧 — 先重启 dev server（--force）再硬刷新
+
+- **标签**：`vite` `HMR` `前端` `白屏` `canvas-agent`
+- **项目**：`D:\project\2026\canvas-agent-unified`
+- **现象**：连续多轮改 App.tsx/组件后，页面白屏或功能表现像旧 bundle（如筛选不联动）；`tsc --noEmit`、`npm run build`、模块 transform（`GET /src/App.tsx`）全部正常，文件编码完好（UTF-8 BOM、无 U+FFFD）。
+- **原因**：vite HMR/fast-refresh 在 hooks 数量/模块结构频繁变化后进入损坏状态，浏览器拿到的运行时模块图陈旧。
+- **修复/约定**：先 `Stop-Process` 掉 vite 再用 `vite.js --host 0.0.0.0 --port 5174 --force` 重启（清依赖缓存），浏览器 Ctrl+Shift+R 硬刷新；仍白屏才去查控制台运行时错误。排查顺序：build/transform/文件编码 → 重启 dev server → 最后才怀疑代码。
