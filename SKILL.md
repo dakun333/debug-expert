@@ -757,3 +757,30 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **现象**：连续多轮改 App.tsx/组件后，页面白屏或功能表现像旧 bundle（如筛选不联动）；`tsc --noEmit`、`npm run build`、模块 transform（`GET /src/App.tsx`）全部正常，文件编码完好（UTF-8 BOM、无 U+FFFD）。
 - **原因**：vite HMR/fast-refresh 在 hooks 数量/模块结构频繁变化后进入损坏状态，浏览器拿到的运行时模块图陈旧。
 - **修复/约定**：先 `Stop-Process` 掉 vite 再用 `vite.js --host 0.0.0.0 --port 5174 --force` 重启（清依赖缓存），浏览器 Ctrl+Shift+R 硬刷新；仍白屏才去查控制台运行时错误。排查顺序：build/transform/文件编码 → 重启 dev server → 最后才怀疑代码。
+
+### 55. pnpm 11 pre-commit 钩子（pnpm exec lint-staged）因 ERR_PNPM_IGNORED_BUILDS 硬失败 — 填 allowBuilds 占位符即修复
+
+- **标签**：`pnpm11` `husky` `lint-staged` `pre-commit` `ERR_PNPM_IGNORED_BUILDS` `allowBuilds` `arti`
+- **项目**：`D:\project\2026\gitlab\arti`（husky pre-commit → `pnpm exec lint-staged`）
+- **现象**：`git commit` 被钩子拦截，报 `[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: @parcel/watcher, esbuild, unrs-resolver`（exit 1）；同时 pnpm 自动往 `pnpm-workspace.yaml` 写入 `allowBuilds: {'@parcel/watcher': set this to true or false, ...}` 占位符并弄脏工作区。错误外层显示 "eslint --fix failed / husky pre-commit script failed"，容易误判成 lint 问题——实际是钩子触发的隐式 `pnpm install`（deps-status-check）先挂了。
+- **根因**：pnpm 11 要求对每个带构建脚本的依赖显式表态（新 `allowBuilds` map 格式）；旧的 `onlyBuiltDependencies` 列表不再阻拦报错。隐式 install 遇到未表态状态直接 exit 1。
+- **修复**：把 `pnpm-workspace.yaml` 里 `allowBuilds` 占位符填成显式 `true/false`（仓库原 `onlyBuiltDependencies` 已列这三个包 → 填 `true` 保持原意；这三个包的 install 脚本只是校验/回退预编译二进制，安全）。填完后钩子内 install 正常执行（顺带把新依赖也装好）。
+- **教训**：husky/pnpm 钩子失败先读完整日志区分「pnpm install 失败」还是「lint 任务失败」；pnpm 11 升级后 `onlyBuiltDependencies` 不再够用，必须补 `allowBuilds` map。另：lint-staged 任一任务失败会整体回滚（stash 备份+还原），不会留下半改状态——所以提交前手动按相同顺序预跑（prettier → eslint --fix → stylelint）最稳。
+
+### 56. pnpm 布局下 stylelint 用 `node node_modules/stylelint/bin/...` 直跑报 ConfigurationError — 必须走 .bin shim
+
+- **标签**：`stylelint` `pnpm` `模块解析` `ConfigurationError` `shim` `arti`
+- **项目**：`D:\project\2026\gitlab\arti`（ESLint 可直跑 node，stylelint 不行）
+- **现象**：`node node_modules/stylelint/bin/stylelint.mjs --fix <file>` 报 `ConfigurationError: Could not find "stylelint-config-recommended"`；同一命令在 lint-staged（pnpm exec）里却能正常加载配置。ESLint 直跑 `node node_modules/eslint/bin/eslint.js` 无此问题。
+- **根因**：stylelint 解析 `extends`（含传递依赖 stylelint-config-recommended，未提升到根 node_modules）时的模块解析上下文依赖入口路径；pnpm 隔离布局 + symlink 下直跑 node 入口解析失败，而 `.bin` shim 的解析上下文正确。
+- **修复**：PowerShell 里用 `& node_modules\.bin\stylelint.CMD --fix <file>`（与 lint-staged 同路径）。
+- **教训**：pnpm 项目直跑 node_modules 里的 bin，eslint 用 `node node_modules/eslint/bin/eslint.js` 没问题不代表 stylelint/prettier 系工具也行；报 "Could not find <config 包>" 先换 `.bin\*.CMD` shim 试一次。另外：迁移类 SCSS（基础段+后部覆盖段、有意重复选择器）过 stylelint 用文件级 `/* stylelint-disable no-duplicate-selectors */`，与迁移 JS 文件头部 `/* eslint-disable */` 惯例一致；`declaration-block-single-line-max-declarations` 则先跑一遍 prettier --write 展开单行声明即消。
+
+### 57. git 自动合并产生"语义重复"（重复声明/重复路由/重复菜单项）— eslint no-redeclare 兜底 + 按符号 grep 排查
+
+- **标签**：`git` `merge` `自动合并` `no-redeclare` `重复路由` `arti`
+- **项目**：`D:\project\2026\gitlab\arti`（HSAI 分支合并 origin/test）
+- **现象**：合并无冲突（app-config.ts、Sidebar/index.tsx 均"Auto-merging ... 成功"），但提交时 eslint 报 `'CanvasPage' is already defined`（no-redeclare）；进一步 grep 发现 `/canvas` 路由块出现两次、Sidebar 菜单入口两份、getOpenKeys 的 OR 条件里 `/canvas` 重复两行。
+- **根因**：两边分支各自在相近位置新增了同符号内容，git 文本级三方合并把两份都保留了——语法上无冲突标记，语义上是坏的。
+- **修复**：保留上游（test）版本、删除我方重复块（对齐上游减少后续冲突）；tsc --noEmit 全量跑一遍兜底类型层重复/断链。
+- **教训**：auto-merge 成功 ≠ 语义正确。合并后必须：① 跑 tsc（抓重复声明/断链导入）；② 对本次合并的关键符号（路由 path、菜单 key、lazy 组件名）grep 一遍看出现次数；③ 依赖 pre-commit 的 eslint no-redeclare 做最后一道网。菜单/路由类重复用户侧表现为"菜单里出现两个相同入口"，很晚才暴露。
