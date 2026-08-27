@@ -681,6 +681,13 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **根因**：工具会追踪命令派生的子进程并在命令结束时尝试清理，`Start-Process` 拉起的 uvicorn 被当作子进程回收（但有时实际存活）。
 - **正确做法**：不要以返回码判断成败；启动后单独执行 `Get-NetTCPConnection -LocalPort 8000 -State Listen` 确认监听 PID，再 `Invoke-WebRequest` 打健康/业务接口验证。进程确实在跑就忽略 kill 报信息。
 - **追加**：`Start-Process -FilePath` 用相对路径（如 `.\.venv\Scripts\python.exe`）会直接报"找不到指定的文件"，即使给了 `-WorkingDirectory`；`-FilePath` 与重定向路径都必须用绝对路径。
+- **追加（彻底避免 kill 报错）**：改用 WMI 创建进程，完全脱离当前 shell 进程树，工具不再追踪/杀掉：
+  ```powershell
+  $cmd = 'cmd.exe /c node "D:\abs\path\vite.js" --port 3013 > "%TEMP%\app.log" 2>&1'
+  Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=$cmd; CurrentDirectory='D:\abs\path'}
+  # ReturnValue=0 即成功；稍后查端口 + 读日志验证
+  ```
+  （2026-08-27 于 arti 项目 vite 3013 启动验证：返回 0、无 ChildProcess.kill、端口监听、HTTP 200。）
 
 ### 47. Vite dev 服务器会吐出过时的模块（改了源码但浏览器/HTTP 拿到的还是旧代码）
 
