@@ -791,3 +791,17 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **根因**：两边分支各自在相近位置新增了同符号内容，git 文本级三方合并把两份都保留了——语法上无冲突标记，语义上是坏的。
 - **修复**：保留上游（test）版本、删除我方重复块（对齐上游减少后续冲突）；tsc --noEmit 全量跑一遍兜底类型层重复/断链。
 - **教训**：auto-merge 成功 ≠ 语义正确。合并后必须：① 跑 tsc（抓重复声明/断链导入）；② 对本次合并的关键符号（路由 path、菜单 key、lazy 组件名）grep 一遍看出现次数；③ 依赖 pre-commit 的 eslint no-redeclare 做最后一道网。菜单/路由类重复用户侧表现为"菜单里出现两个相同入口"，很晚才暴露。
+
+### 58. Windows core.autocrlf=true 时本地 eslint/stylelint 的 prettier 全文件报 `Delete ␍` — 环境性噪音，验证必须过滤
+
+- **标签**：`eslint` `stylelint` `prettier` `crlf` `autocrlf` `arti` `windows`
+- **项目**：`D:\project\2026\gitlab\arti`
+- **现象**：改完文件本地跑 eslint/stylelint 报几百上千条 `prettier/prettier Delete ␍`，看似 lint 全崩；对**未改动**文件（如 src/views/workflow/page.tsx）同样全行报 ␍（2061 条），证明与本次改动无关。
+- **根因**：仓库 prettier 默认要 LF，而本机 `git config core.autocrlf=true` 工作区检出为 CRLF；CI 在 Linux 以 LF 运行所以能过。本地 lint 的 ␍ 报错是环境性噪音。
+- **修复/口径**：
+  1. 不要慌、不要手动改行 endings（会产生海量 diff）；
+  2. eslint 用 `--format json` 后过滤 `!m.message.startsWith('Delete')`，只看剩余错误数；
+  3. stylelint 走 `& node_modules\.bin\stylelint.CMD <file>`（见 #56），同样只看非 ␍ 错误；
+  4. 或用 vite dev server 请求模块 URL 验证编译（见 #39）。
+- **验证**：过滤后改动文件非 ␍ 错误 0 条；`tsc --noEmit --skipLibCheck` 通过。
+- **教训**：arti 仓库在本机 lint 验证的基线是「除 ␍ 外无错误」，不是「零错误」；判断改动是否破坏 lint 必须先过滤行结尾噪音。
