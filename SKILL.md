@@ -805,3 +805,13 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
   4. 或用 vite dev server 请求模块 URL 验证编译（见 #39）。
 - **验证**：过滤后改动文件非 ␍ 错误 0 条；`tsc --noEmit --skipLibCheck` 通过。
 - **教训**：arti 仓库在本机 lint 验证的基线是「除 ␍ 外无错误」，不是「零错误」；判断改动是否破坏 lint 必须先过滤行结尾噪音。
+
+### 59. `axios.create()` 继承全局 `axios.defaults.baseURL='/api'` — OSS 同源代理路径被拼成 `/api/oss-upload/...` 404
+
+- **标签**：`axios` `baseURL` `oss` `proxy` `arti` `upload` `cors`
+- **项目**：`D:\project\2026\gitlab\arti`（canvas / ai-design-agent 上传 PUT）
+- **现象**：上传 PUT 改用 vite 同源代理 `/oss-upload/<host>/...`（`file-utils.ts` 的 `getOssUploadUrl`）后浏览器仍失败；console 里请求 URL 是 `http://localhost:3013/api/oss-upload/...`，多了 `/api` 前缀 404。此前直连 OSS 签名 URL 则被 CORS 拦（shell 直连/走代理均 200，证明签名有效、纯 CORS 问题）。
+- **根因**：`src/api/interceptor.ts` 全局 `axios.defaults.baseURL = '/api'`；无参 `axios.create()` 会**继承**全局 defaults，相对路径被加前缀。仓库其他上传流（file-utils 各 upload*）都显式 `axios.default.create({ baseURL: '' })`。
+- **修复**：OSS PUT 统一 `axios.create({ baseURL: '' })` + `getOssUploadUrl(upload_url)`；canvas page.tsx 与 ai-design-agent page.tsx 两处同修。
+- **验证**：改后请求发往 `/oss-upload/...` 200，上传成功。
+- **教训**：本仓库新建临时 axios 实例打非 `/api` 地址（OSS 同源代理、第三方 URL）必须显式 `baseURL: ''`，`axios.create()` 不等于干净实例。排查浏览器请求失败时先看请求头 Referer/端口确认是哪个 dev 实例/旧标签页（本次 3012/3013 双实例并存，旧 tab 跑旧 bundle 造成「修了还报错」的假象，硬刷新即解）。
