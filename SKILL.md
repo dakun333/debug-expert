@@ -815,3 +815,15 @@ claude mcp reset-project-choices       # é‡ç½®é¡¹ç›®çš„ .mcp.json æ‰¹å‡†/æ‹’ç»
 - **ä¿®å¤**ï¼šOSS PUT ç»Ÿä¸€ `axios.create({ baseURL: '' })` + `getOssUploadUrl(upload_url)`ï¼›canvas page.tsx ä¸ ai-design-agent page.tsx ä¸¤å¤„åŒä¿®ã€‚
 - **éªŒè¯**ï¼šæ”¹åè¯·æ±‚å‘å¾€ `/oss-upload/...` 200ï¼Œä¸Šä¼ æˆåŠŸã€‚
 - **æ•™è®­**ï¼šæœ¬ä»“åº“æ–°å»ºä¸´æ—¶ axios å®ä¾‹æ‰“é `/api` åœ°å€ï¼ˆOSS åŒæºä»£ç†ã€ç¬¬ä¸‰æ–¹ URLï¼‰å¿…é¡»æ˜¾å¼ `baseURL: ''`ï¼Œ`axios.create()` ä¸ç­‰äºå¹²å‡€å®ä¾‹ã€‚æ’æŸ¥æµè§ˆå™¨è¯·æ±‚å¤±è´¥æ—¶å…ˆçœ‹è¯·æ±‚å¤´ Referer/ç«¯å£ç¡®è®¤æ˜¯å“ªä¸ª dev å®ä¾‹/æ—§æ ‡ç­¾é¡µï¼ˆæœ¬æ¬¡ 3012/3013 åŒå®ä¾‹å¹¶å­˜ï¼Œæ—§ tab è·‘æ—§ bundle é€ æˆã€Œä¿®äº†è¿˜æŠ¥é”™ã€çš„å‡è±¡ï¼Œç¡¬åˆ·æ–°å³è§£ï¼‰ã€‚
+### 60. tldraw »­²¼Ö¸Õë²¶»ñÍÌµôĞÎ×´ÉÏ°´Å¥µÄ click + antd Popover µ¯²ãÂäÔÚĞÎ×´ÈİÆ÷ÄÚ²Ëµ¥µã»÷È«Ê§Ğ§
+
+- **±êÇ©**£º`tldraw` `antd` `popover` `pointer-capture` `click¶ªÊ§` `arti` `canvas`
+- **ÏîÄ¿**£º`D:\project\2026\gitlab\arti`£¨canvas ¿¨Æ¬Ä£ĞÍ£¬tldraw 5.3.1 + antd 6£©
+- **ÏÖÏó**£º¢Ù ¹ÒÔÚ tldraw ĞÎ×´ HTMLContainer ÉÏ¡¢ÇÒÔÚÒÑ stopPropagation µÄ±íµ¥ÇøÖ®ÍâµÄ°´Å¥£¬ÓÃ antd `Popover trigger='click'` °ü×¡ºóµã»÷ÎŞ·´Ó¦£¨µ¯²ã²»¿ª£©£»¢Ú ¸ÄÎª pointerdown ÊÖ¶¯ open ºóµ¯²ã"ÉÁÒ»ÏÂ¾Í¹Ø"£»¢Û µ¯²ã´ò¿ªºóµã²Ëµ¥ÏîºÁÎŞ·´Ó¦£¨Èçµã"ÉÏ´«Í¼Æ¬"²»½øÎÄ¼şÑ¡ÔñÆ÷£©¡£
+- **¸ùÒò**£ºÈı¸öÁ¬»·¿Ó¡ª¡ª
+  1. tldraw »­²¼ÔÚ×Ô¼ºµÄ pointerdown ´¦ÀíÆ÷Àï `setPointerCapture`£¬°´Å¥ pointerdown Ã°Åİµ½»­²¼ºó£¬ºóĞø click Âäµ½»­²¼ÔªËØÉÏ£¬antd ÊÕ²»µ½´¥·¢£»
+  2. ÔÚ pointerdown ÀïÊÖ¶¯ toggle ÊÜ¿Ø open ºó£¬Ô­Éú click ÓÖ´¥·¢ antd trigger µÄ toggle ¡ú Í¬Ò»´Îµã»÷¿ª¡ú¹ØË«ÖØÇĞ»» = ÉÁ¹Ø£»
+  3. antd Popover Ä¬ÈÏ `getPopupContainer = triggerNode.parentNode`£¬µ¯²ãäÖÈ¾ÔÚ tldraw ĞÎ×´ÈİÆ÷ÄÚ£¬²Ëµ¥ÏîµÄ pointerdown Í¬Ñù±»»­²¼²¶»ñÍÌµô click£¨±íµ¥ÇøÄÚµÄ Popover Õı³£ÊÇÒòÎªÆäµ¯²ãÂäÔÚÃæ°å¸ù½ÚµãÒÑ stopPropagation µÄÇøÓòÄÚ£©¡£
+- **ĞŞ¸´**£º°´Å¥ `onPointerDown` Ö»×ö `event.stopPropagation()`£¨**²»Òª preventDefault**¡ª¡ª»áÒÖÖÆ click£»**²»ÒªÊÖ¶¯ toggle**¡ª¡ª½»¸ø antd£©£»µ¯²ã content ¸ù½Úµã°üÒ»²ã `onPointerDown={e => e.stopPropagation()}`£¨±È `getPopupContainer={() => document.body}` ¸üÊ¡ÊÂÇÒ²»ÒÀÀµ antd °æ±¾ API£©£»hover ÓïÒåÓÃ `trigger='hover'` + `mouseEnterDelay={0}` + `mouseLeaveDelay={0.15}` ÊÜ¿Ø open ¼´¿É¡£
+- **ÑéÖ¤**£ºÓ²Ë¢ĞÂºóµã°´Å¥µ¯²ãÎÈ¶¨¿ªºÏ£¬²Ëµ¥Ïî click Õı³£ÅÉ·¢£¨ÎÄ¼şÑ¡ÔñÆ÷µ¯³ö£©¡£
+- **½ÌÑµ**£ºtldraw ĞÎ×´ÉÏ·Å½»»¥ÔªËØ£¬ÏÈÏëÇå³ş pointerdown Ã°ÅİÂ·¾¶ÉÏÓĞÃ»ÓĞ stopPropagation£»»­²¼ÇøÒ»ÇĞ"click ²»´¥·¢/pointer ÊÂ¼ş±»ÇÀ"ÓÅÏÈ»³ÒÉ `setPointerCapture`¡£µ÷ÊÔÕâÀàÎÊÌâ·ÖÁ½²ãµÄ£ºÏÈÈÃ trigger ÄÜÊÕµ½ click£¬ÔÙÈÃµ¯²ãÄÚÈİÄÜÊÕµ½ click£¬Á½²ã¶¼¿ÉÄÜ±»»­²¼ÍÌ¡£
