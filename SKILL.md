@@ -869,3 +869,11 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
   4. 取值路径：`root → loaderData → routes/share.$shareId.($action) → serverResponse → data → linear_conversation`，节点结构 `{id, message:{author.role, content:{content_type, parts|text|thoughts}}, parent, children}`
 - **验证**：15 个消息节点全部还原，用户提问与 6737 字符回答完整提取。
 - **教训**：① React Router v7 / Remix single-fetch 的 turbo-stream 扁平格式解码必须备忘录 + 循环引用安全，不能朴素递归；② Grep 工具搜超长单行文件会报 `Ripgrep JSON record exceeded 65536 bytes`，改用 PowerShell `IndexOf` 定位；③ PowerShell 输出 UTF-8 中文前必须 `[Console]::OutputEncoding = [Text.Encoding]::UTF8`，否则 pageTitle 等显示为问号乱码。
+### 65. Chromium "Paste and Match Style" 走独立链路 `PasteMode::kPlainTextOnly`，Ctrl+Shift+V 必须在 keydown 阶段截断为自定义命令
+
+- **标签**：`chrome` `chromium` `ctrl+shift+v` `paste` `kPlainTextOnly` `clipboard` `画布` `arti` `智能粘贴`
+- **现象**：画布需要"Ctrl+V 普通粘贴 / Ctrl+Shift+V 粘贴+附加动作"。实测（#62）Ctrl+Shift+V 的 paste 事件数据全空，最初的"paste 事件里读 clipboardData"方案在该快捷键下必然失败。
+- **根因**：Chromium 源码层确认——普通 Paste 与 "Paste and Match Style"（Ctrl+Shift+V）是两条不同路径，后者明确使用 `PasteMode::kPlainTextOnly`，在构造 DataTransfer **之前**就完成格式裁剪。不是页面代码拿晚了，是事件数据天生没有。
+- **修复**：Ctrl+Shift+V 不再当 paste 处理，而是画布自定义命令（Smart Paste）：① window keydown **capture 阶段**判定组合键（`ctrl/meta+shift+!alt+v`、守卫 `isEditableElement` + 画布区域），命中即 `preventDefault + stopPropagation + stopImmediatePropagation` 吃掉快捷键；② 在用户手势上下文里直接 `navigator.clipboard.read()` 读图像 → 素材卡 + 生成器卡连线；③ 纯文本剪贴板退化为普通文本卡；④ Explorer 文件列表（CF_HDROP）Web 平台不可达，提示改用 Ctrl+V。Ctrl+V 保持走 paste 事件 `clipboardData.files`（成本最低的天然路径）。不需要任何设置开关。
+- **验证**：tsc + ESLint 通过；钉钉/微信截图、浏览器 Copy Image 走 `clipboard.read()` 通道（与 #62 已验证通道相同）；Explorer 文件 + Ctrl+Shift+V 明确标记为 Web Platform Unsupported，彻底解决需 Chrome Extension + Native Messaging + Windows helper（`GetClipboardData(CF_HDROP)` / `DragQueryFileW`），且 Native Messaging 单条消息上限 1MB，大文件应由 native host 直接传 OSS 只回传 assetId/URL。
+- **教训**：① 快捷键增强类需求，先查清浏览器对该组合键的**默认行为链路**（源码常量如 `PasteMode::kPlainTextOnly`），再决定是"扩展 paste 事件"还是"keydown 截断为命令"；② keydown 里 `preventDefault` 后 `navigator.clipboard.read()` 仍可用（transient user activation 足够）；③ 网页能力边界（CF_HDROP 文件列表）不要硬绕，明确标 unsupported 或走 native bridge，避免无效 hack。
