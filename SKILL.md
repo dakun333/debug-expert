@@ -827,3 +827,13 @@ claude mcp reset-project-choices       # é‡ç½®é¡¹ç›®çš„ .mcp.json æ‰¹å‡†/æ‹’ç»
 - **ĞŞ¸´**£º°´Å¥ `onPointerDown` Ö»×ö `event.stopPropagation()`£¨**²»Òª preventDefault**¡ª¡ª»áÒÖÖÆ click£»**²»ÒªÊÖ¶¯ toggle**¡ª¡ª½»¸ø antd£©£»µ¯²ã content ¸ù½Úµã°üÒ»²ã `onPointerDown={e => e.stopPropagation()}`£¨±È `getPopupContainer={() => document.body}` ¸üÊ¡ÊÂÇÒ²»ÒÀÀµ antd °æ±¾ API£©£»hover ÓïÒåÓÃ `trigger='hover'` + `mouseEnterDelay={0}` + `mouseLeaveDelay={0.15}` ÊÜ¿Ø open ¼´¿É¡£
 - **ÑéÖ¤**£ºÓ²Ë¢ĞÂºóµã°´Å¥µ¯²ãÎÈ¶¨¿ªºÏ£¬²Ëµ¥Ïî click Õı³£ÅÉ·¢£¨ÎÄ¼şÑ¡ÔñÆ÷µ¯³ö£©¡£
 - **½ÌÑµ**£ºtldraw ĞÎ×´ÉÏ·Å½»»¥ÔªËØ£¬ÏÈÏëÇå³ş pointerdown Ã°ÅİÂ·¾¶ÉÏÓĞÃ»ÓĞ stopPropagation£»»­²¼ÇøÒ»ÇĞ"click ²»´¥·¢/pointer ÊÂ¼ş±»ÇÀ"ÓÅÏÈ»³ÒÉ `setPointerCapture`¡£µ÷ÊÔÕâÀàÎÊÌâ·ÖÁ½²ãµÄ£ºÏÈÈÃ trigger ÄÜÊÕµ½ click£¬ÔÙÈÃµ¯²ãÄÚÈİÄÜÊÕµ½ click£¬Á½²ã¶¼¿ÉÄÜ±»»­²¼ÍÌ¡£
+
+### 61. tldraw Õ³Ìù±¾µØÎÄ¼ş£¨×ÊÔ´¹ÜÀíÆ÷¸´ÖÆ£©ÎŞ·´Ó¦¡ª¡ª`navigator.clipboard.read()` ²»Ö§³ÖÎÄ¼şÁĞ±í
+
+- **±êÇ©**£º`tldraw` `paste` `clipboard` `navigator.clipboard.read` `±¾µØÎÄ¼şÕ³Ìù` `arti` `canvas`
+- **ÏîÄ¿**£º`D:\project\2026\gitlab\arti`£¨canvas£¬tldraw 5.3.1£©
+- **ÏÖÏó**£º½ØÍ¼£¨¼ôÌù°åÍ¼ÏñÊı¾İ£©Ctrl+V / Ctrl+Shift+V Õ³ÌùÕı³££»µ«ÔÚ×ÊÔ´¹ÜÀíÆ÷Àï Ctrl+C ¸´ÖÆÍ¼Æ¬ÎÄ¼şºóÕ³ÌùÍêÈ«ÎŞ·´Ó¦£¨ÎŞ¿¨Æ¬¡¢ÎŞÌáÊ¾£©¡£
+- **¸ùÒò**£ºtldraw µÄÔ­Éú paste ´¦ÀíÆ÷£¨`useNativeClipboardEvents`£©ÓÅÏÈµ÷ÓÃ `navigator.clipboard.read()`£¬³É¹¦Ê±Ö»ÓÃÆä·µ»ØµÄ ClipboardItems£¨`e.clipboardData.files` ½ö×÷ fallback ÇÒÔÚ things Îª¿Õ»ò´¿ÎÄ±¾Ê±²Å×·¼Ó£©¡£Chrome µÄÒì²½ Clipboard API **²»Ö§³Ö×ÊÔ´¹ÜÀíÆ÷¸´ÖÆµÄÎÄ¼şÁĞ±í**£¨CF_HDROP£©£¬read() ³É¹¦·µ»Øµ«È¡²»µ½ÎÄ¼ş ¡ú fallback Ìõ¼ş²»ÃüÖĞ ¡ú ¾²Ä¬¶ªÆú¡£½ØÍ¼×ßµÄÊÇÍ¼ÏñÊı¾İ£¨image/png£©£¬read() ÄÜÄÃµ½£¬ËùÒÔÕı³£¡£
+- **ĞŞ¸´**£ºÔÚ window **²¶»ñ½×¶Î**µÄ paste ¼àÌıÀïÖ±½Ó´¦Àí `event.clipboardData.files`£¨½ØÍ¼Óë±¾µØÎÄ¼şÍ³Ò»×ß×Ô½¨¹ÜÏß£©£¬Ëæºó `preventDefault + stopPropagation` ×è¶Ï tldraw µÄºóĞøÁ´£»tldraw µÄ `registerExternalContentHandler('files')` ±£Áô¸øÍÏ×§£¨drop ²»¾­¹ı paste ÊÂ¼ş£©¡£ÂäµãÓÃ `editor.user.getIsPasteAtCursorMode() ? editor.inputs.getCurrentPagePoint() : undefined` Óë tldraw Ô­ĞĞÎª¶ÔÆë¡£
+- **ÑéÖ¤**£ºÓ²Ë¢ĞÂºó×ÊÔ´¹ÜÀíÆ÷¸´ÖÆ jpg ¡ú Ctrl+Shift+V Õı³£½¨ËØ²Ä¿¨+Éú³ÉÆ÷¿¨Á¬Ïß£»½ØÍ¼Õ³ÌùĞĞÎª²»±ä¡£
+- **½ÌÑµ**£ºÅÅ²é"¼ôÌù°å X ÄÜÌù Y ²»ÄÜÌù"Ê±£¬ÏÈÈ·ÈÏ¿ò¼Ü×ßµÄÊÇÍ¬²½ `event.clipboardData` »¹ÊÇÒì²½ `navigator.clipboard.read()`¡ª¡ªÁ½ÕßÄÜÁ¦¼¯²»Í¬£¨ºóÕßÄÃ²»µ½ÎÄ¼şÁĞ±í¡¢ĞèÒªÈ¨ÏŞ¡¢¸ñÊ½Ö§³ÖÉÙ£©¡£²¶»ñ²ãÀ¹½Ø + stopPropagation ÊÇÈÆ¹ı¿ò¼Ü¼ôÌù°åÁ´µÄ¸É¾»×ö·¨¡£
