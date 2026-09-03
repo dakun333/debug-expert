@@ -856,3 +856,16 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **����**��tldraw `getShape(shape: TLShapeId | TLShape)` �ڲ�ֱ�Ӷ� `shape.id`���� undefined �����쳣�����Ƿ��� undefined���������� `group.props.sourceShapeId as TLShapeId` ǿת��ֱ�Ӵ��룬����ѡ����/���"����"��������Դ�㿨û�� sourceShapeId��һ���о�ը��
 - **�޸�**��`const sourceId = props.sourceShapeId as TLShapeId | undefined; const source = sourceId ? editor.getShape(sourceId) : undefined;`��������"��ѡ shape id"��sourceShapeId��generatedByGroupId �ȣ�ȡֵ�����п��� getShape/getShapePageBounds��`getShapePageBounds(��Чid)` �Բ����ڵ� id ���� null ���ף��� `getShape(undefined)` ���ף�������Ϊ��һ�¡�
 - **��ѵ**��tldraw �� `as TLShapeId` ǿת��ѡ props �Ǹ�Σ������ͬһ�������εķ���������`sourceShapeId || isGenerationCard`���ſ�ʱ���������н����õ㶼Ҫ�����пա�
+
+### 64. ChatGPT share 页面对话在 `__reactRouterContext.streamController.enqueue()` 的 turbo-stream 扁平数组里，朴素递归解码爆栈
+
+- **标签**：`chatgpt` `share-page` `turbo-stream` `react-router` `解码` `RecursionError` `提取对话`
+- **现象**：从 ChatGPT 分享页 HTML（约 550KB、全文仅 10 余行超长行）提取对话数据，搜不到 `__remixContext` / `mapping` / `content_type` / `parts` 等旧版关键字；真实数据在 `<script>window.__reactRouterContext.streamController.enqueue("...")` 内，是 JS 转义字符串包裹的 turbo-stream 扁平 JSON 数组（对象写作 `{"_N":M}` 索引对、数组元素为索引、`-5`=null 等负数特殊常量）。写朴素递归还原对象图时 `RecursionError: maximum recursion depth exceeded`。
+- **根因**：扁平数组对重复值去重（同一索引被大量引用）且存在循环/深层引用（如 `["P",1159]` promise 包装），无备忘录的递归无限深入。
+- **修复**：
+  1. 反转义一步到位：`json.loads('"' + raw + '"')` 解 JS 字符串，再 `json.loads` 得扁平数组
+  2. 解码器带 `memo = {}`：遇 dict/list 先 `memo[idx] = out` 再填充子项，循环引用自然闭环；`sys.setrecursionlimit(100000)` 兜底
+  3. 负数常量表：-1 hole / -2 NaN / -3 -Inf / -4 -0 / -5 null / -6 +Inf / -7 undefined
+  4. 取值路径：`root → loaderData → routes/share.$shareId.($action) → serverResponse → data → linear_conversation`，节点结构 `{id, message:{author.role, content:{content_type, parts|text|thoughts}}, parent, children}`
+- **验证**：15 个消息节点全部还原，用户提问与 6737 字符回答完整提取。
+- **教训**：① React Router v7 / Remix single-fetch 的 turbo-stream 扁平格式解码必须备忘录 + 循环引用安全，不能朴素递归；② Grep 工具搜超长单行文件会报 `Ripgrep JSON record exceeded 65536 bytes`，改用 PowerShell `IndexOf` 定位；③ PowerShell 输出 UTF-8 中文前必须 `[Console]::OutputEncoding = [Text.Encoding]::UTF8`，否则 pageTitle 等显示为问号乱码。
