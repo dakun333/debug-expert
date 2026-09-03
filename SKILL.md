@@ -847,3 +847,12 @@ claude mcp reset-project-choices       # é‡ç½®é¡¹ç›®çš„ .mcp.json æ‰¹å‡†/æ‹’ç»
 - **ĞŞ¸´**£ºpaste ÊÂ¼şÊı¾İÎª¿ÕÇÒ tracked µ½ shift Ê±£¬»ØÍË `navigator.clipboard.read()` ¶ÁÔ­Ê¼¼ôÌù°å£¨²»ÊÜÊÂ¼ş¹ıÂËÓ°Ïì£©£º±éÀú ClipboardItems ÕÒ `image/*|video/*` ÀàĞÍ getType ÄÃ Blob ×ª File ×ßÍ³Ò»Ã½Ìå¹ÜÏß£»¶Á²»µ½£¨Èç×ÊÔ´¹ÜÀíÆ÷ÎÄ¼şÁĞ±í CF_HDROP£¬Òì²½ API ±¾Éí²»Ö§³Ö£©ÔòÌáÊ¾"ÇëÊ¹ÓÃ Ctrl+V"¡£
 - **ÑéÖ¤**£ºÓ²Ë¢ĞÂºó¶¤¶¤½ØÍ¼/¿´Í¼Èí¼şÍ¼Ïñ Ctrl+Shift+V Õı³£½¨¿¨+Á¬Ïß£»ÎÄ×Ö Ctrl+Shift+V Õı³££»×ÊÔ´¹ÜÀíÆ÷ÎÄ¼ş Ctrl+Shift+V ÌáÊ¾¸ÄÓÃ Ctrl+V£¨Æ½Ì¨ÏŞÖÆ£¬ÎŞ·¨ÈÆ¹ı£©¡£
 - **½ÌÑµ**£ºÅÅ²é"¿ì½İ¼ü A ÄÜÌù¡¢¿ì½İ¼ü B ²»ÄÜÌù"£¬ÏÈ´òÈÕÖ¾¿´ paste ÊÂ¼şµÄ `types/files/items`¡ª¡ªÊÂ¼şÅÉ·¢µ«Êı¾İÎª¿Õ = ä¯ÀÀÆ÷Ô¤¹ıÂË£¬²»ÊÇ´úÂë bug¡£sync `event.clipboardData` Óë async `navigator.clipboard.read()` ÄÜÁ¦»¥²¹£ºÇ°ÕßÄÜÄÃÎÄ¼şÁĞ±í£¨½ö Ctrl+V£©£¬ºóÕßÄÜÈÆ¹ı´¿ÎÄ±¾¹ıÂËÄÃÍ¼ÏñÊı¾İ£¨½ö Ctrl+Shift+V ¿ÕÊÂ¼şÊ±£©£¬Á½¸ö API ×éºÏ²ÅÄÜ¸²¸ÇÈ«²¿³¡¾°£¨¼û #61£©¡£
+
+### 63. tldraw `editor.getShape(undefined)` Ö±½ÓÅ× TypeError£¬¿ÉÑ¡ id ±ØĞëÅĞ¿ÕºóÔÙ´«
+
+- **±êÇ©**£º`tldraw` `getShape` `undefined` `TypeError` `¿ÉÑ¡props` `arti` `canvas`
+- **ÏîÄ¿**£º`D:\project\2026\gitlab\arti`£¨canvas ×é¿¨ÔËĞĞ»ØÌî£©
+- **ÏÖÏó**£º`TypeError: Cannot read properties of undefined (reading 'id') at Editor.getShape`£¬React ´íÎó±ß½ç°×ÆÁ¡£
+- **¸ùÒò**£ºtldraw `getShape(shape: TLShapeId | TLShape)` ÄÚ²¿Ö±½Ó¶Á `shape.id`£¬´« undefined ¼´Å×Òì³££¨²»ÊÇ·µ»Ø undefined£©¡£´úÂëÀï `group.props.sourceShapeId as TLShapeId` Ç¿×ªºóÖ±½Ó´«Èë£¬¶ø¿òÑ¡½¨¿¨/×ó²à"Éú³É"´´½¨µÄÎŞÔ´Âã¿¨Ã»ÓĞ sourceShapeId£¬Ò»ÔËĞĞ¾ÍÕ¨¡£
+- **ĞŞ¸´**£º`const sourceId = props.sourceShapeId as TLShapeId | undefined; const source = sourceId ? editor.getShape(sourceId) : undefined;`¡ª¡ªËùÓĞ"¿ÉÑ¡ shape id"£¨sourceShapeId¡¢generatedByGroupId µÈ£©È¡ÖµºóÏÈÅĞ¿ÕÔÙ getShape/getShapePageBounds¡£`getShapePageBounds(ÓĞĞ§id)` ¶Ô²»´æÔÚµÄ id ·µ»Ø null ²»Å×£¬µ« `getShape(undefined)` »áÅ×£¬Á½ÕßĞĞÎª²»Ò»ÖÂ¡£
+- **½ÌÑµ**£ºtldraw Àï `as TLShapeId` Ç¿×ª¿ÉÑ¡ props ÊÇ¸ßÎ£¶¯×÷£»Í¬Ò»º¯ÊıÉÏÓÎµÄ·ÅĞĞÌõ¼ş£¨`sourceShapeId || isGenerationCard`£©·Å¿íÊ±£¬ÏÂÓÎËùÓĞ½âÒıÓÃµã¶¼Òª¸ú×ÅÅĞ¿Õ¡£
