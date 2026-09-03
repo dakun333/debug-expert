@@ -877,3 +877,12 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **修复**：Ctrl+Shift+V 不再当 paste 处理，而是画布自定义命令（Smart Paste）：① window keydown **capture 阶段**判定组合键（`ctrl/meta+shift+!alt+v`、守卫 `isEditableElement` + 画布区域），命中即 `preventDefault + stopPropagation + stopImmediatePropagation` 吃掉快捷键；② 在用户手势上下文里直接 `navigator.clipboard.read()` 读图像 → 素材卡 + 生成器卡连线；③ 纯文本剪贴板退化为普通文本卡；④ Explorer 文件列表（CF_HDROP）Web 平台不可达，提示改用 Ctrl+V。Ctrl+V 保持走 paste 事件 `clipboardData.files`（成本最低的天然路径）。不需要任何设置开关。
 - **验证**：tsc + ESLint 通过；钉钉/微信截图、浏览器 Copy Image 走 `clipboard.read()` 通道（与 #62 已验证通道相同）；Explorer 文件 + Ctrl+Shift+V 明确标记为 Web Platform Unsupported，彻底解决需 Chrome Extension + Native Messaging + Windows helper（`GetClipboardData(CF_HDROP)` / `DragQueryFileW`），且 Native Messaging 单条消息上限 1MB，大文件应由 native host 直接传 OSS 只回传 assetId/URL。
 - **教训**：① 快捷键增强类需求，先查清浏览器对该组合键的**默认行为链路**（源码常量如 `PasteMode::kPlainTextOnly`），再决定是"扩展 paste 事件"还是"keydown 截断为命令"；② keydown 里 `preventDefault` 后 `navigator.clipboard.read()` 仍可用（transient user activation 足够）；③ 网页能力边界（CF_HDROP 文件列表）不要硬绕，明确标 unsupported 或走 native bridge，避免无效 hack。
+
+### 66. 画布切换不取消防抖保存定时器 → 旧 canvas_uid 闭包把新画布内容写进旧画布（跨画布数据污染）
+
+- **标签**：`arti` `canvas` `数据污染` `防抖` `useCallback 闭包` `activeCanvasId` `document/save` `竞态`
+- **现象**：部分用户画布出现"莫名其妙的数据"（其他画布的内容混入/内容被清空），基于污染快照跑生成结果离谱；开发者本地（少切换、常硬刷新）无法复现。
+- **根因**：`scheduleCanvasSave` 300ms 防抖定时器闭包绑定切换前的 `activeCanvasId`；`openCanvas`/`handleCreateCanvas` 切换画布时**不清理保存定时器与在途/排队标记**（只有组件卸载和 409 冲突路径清理）。切换后定时器触发，`persistCanvasSnapshot` 用旧 `canvas_uid` + 已被 restore 覆盖的 `canvasVersionRef`（新画布版本号）把**新画布内容（或新建画布的空文档）** POST 到 `/canvas/document/save` → 版本号恰好通过校验时静默覆盖。同链路 `.then` 还会把旧画布 version 写进当前 `canvasVersionRef`，污染新画布后续保存。
+- **修复**：三层防御——① `persistCanvasSnapshot` 入口加 `activeCanvasId !== activeCanvasIdRef.current` 过期闭包守卫（作废旧定时器/保存链回调）；② 保存 `.then` 仅在 `activeCanvasIdRef.current === activeCanvasId` 时更新 `canvasVersionRef`；③ `openCanvas` 与 `handleCreateCanvas` 入口重置保存状态（clearTimeout + `saveQueuedRef/saveInFlightRef/savePromiseRef` 清空）。
+- **验证**：tsc + ESLint 通过；对照佐证——运行轮询 `watchCanvasRuns` 早有同款守卫（回调里 `canvasId !== activeCanvasIdRef.current` 即丢弃），唯独保存链路漏了。
+- **教训**：① SPA 内多文档切换场景，**所有按文档 id 闭包绑定的异步回调（防抖/轮询/保存链）在切换点必须显式失效**，不能只靠 useCallback deps 更新（已挂起的定时器仍持旧闭包）；② 写操作回调用"闭包 id vs ref 当前 id"做双重校验是兜底模式；③ "A 用户正常 B 用户异常"类问题优先怀疑**操作路径差异**（切换频率/刷新习惯）触发的竞态，而非数据本身。
