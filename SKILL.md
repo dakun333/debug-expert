@@ -837,3 +837,13 @@ claude mcp reset-project-choices       # é‡ç½®é¡¹ç›®çš„ .mcp.json æ‰¹å‡†/æ‹’ç»
 - **ĞŞ¸´**£ºÔÚ window **²¶»ñ½×¶Î**µÄ paste ¼àÌıÀïÖ±½Ó´¦Àí `event.clipboardData.files`£¨½ØÍ¼Óë±¾µØÎÄ¼şÍ³Ò»×ß×Ô½¨¹ÜÏß£©£¬Ëæºó `preventDefault + stopPropagation` ×è¶Ï tldraw µÄºóĞøÁ´£»tldraw µÄ `registerExternalContentHandler('files')` ±£Áô¸øÍÏ×§£¨drop ²»¾­¹ı paste ÊÂ¼ş£©¡£ÂäµãÓÃ `editor.user.getIsPasteAtCursorMode() ? editor.inputs.getCurrentPagePoint() : undefined` Óë tldraw Ô­ĞĞÎª¶ÔÆë¡£
 - **ÑéÖ¤**£ºÓ²Ë¢ĞÂºó×ÊÔ´¹ÜÀíÆ÷¸´ÖÆ jpg ¡ú Ctrl+Shift+V Õı³£½¨ËØ²Ä¿¨+Éú³ÉÆ÷¿¨Á¬Ïß£»½ØÍ¼Õ³ÌùĞĞÎª²»±ä¡£
 - **½ÌÑµ**£ºÅÅ²é"¼ôÌù°å X ÄÜÌù Y ²»ÄÜÌù"Ê±£¬ÏÈÈ·ÈÏ¿ò¼Ü×ßµÄÊÇÍ¬²½ `event.clipboardData` »¹ÊÇÒì²½ `navigator.clipboard.read()`¡ª¡ªÁ½ÕßÄÜÁ¦¼¯²»Í¬£¨ºóÕßÄÃ²»µ½ÎÄ¼şÁĞ±í¡¢ĞèÒªÈ¨ÏŞ¡¢¸ñÊ½Ö§³ÖÉÙ£©¡£²¶»ñ²ãÀ¹½Ø + stopPropagation ÊÇÈÆ¹ı¿ò¼Ü¼ôÌù°åÁ´µÄ¸É¾»×ö·¨¡£
+
+### 62. Ctrl+Shift+V£¨Õ³ÌùÎª´¿ÎÄ±¾£©paste ÊÂ¼şÊı¾İ±» Chrome Ô¤¹ıÂË¡ª¡ªÍ¼Ïñ/ÎÄ¼şÄÃµ½¿Õ DataTransfer
+
+- **±êÇ©**£º`chrome` `paste` `ctrl+shift+v` `clipboardDataÎª¿Õ` `navigator.clipboard.read` `arti` `canvas`
+- **ÏîÄ¿**£º`D:\project\2026\gitlab\arti`£¨canvas Õ³Ìù£©
+- **ÏÖÏó**£ºCtrl+V Õ³ÌùÍ¼Æ¬Õı³££»Í¬Ò»¼ôÌù°åÄÚÈİÓÃ Ctrl+Shift+V ÔòÍêÈ«ÎŞ·´Ó¦¡£Õï¶ÏÈÕÖ¾£ºpaste ÊÂ¼şÕÕ³£ÅÉ·¢£¬µ« `clipboardData.types=[]¡¢files=0¡¢items=0`£»ÎÄ×Ö¼ôÌù°åÔò `types=['text/plain']` Õı³£¡£
+- **¸ùÒò**£ºChrome °Ñ Ctrl+Shift+V ÊµÏÖÎª"Õ³ÌùÎª´¿ÎÄ±¾"£¨paste-and-match-style£©£¬ÅÉ·¢ paste ÊÂ¼şÇ°»á°Ñ DataTransfer **Ô¤¹ıÂËµ½Ö»Ê£ text/plain ±íÊ¾**£»Í¼Ïñ/ÎÄ¼şÁĞ±íÃ»ÓĞÎÄ±¾±íÊ¾ ¡ú ÊÂ¼şÊı¾İÍêÈ«Îª¿Õ£¬Ò³ÃæÈÎºÎ·ÖÖ§¶¼ÄÃ²»µ½ÄÚÈİ¡£Õâ²»ÊÇ tldraw ÎÊÌâ£¬ÊÇä¯ÀÀÆ÷ĞĞÎª¡£
+- **ĞŞ¸´**£ºpaste ÊÂ¼şÊı¾İÎª¿ÕÇÒ tracked µ½ shift Ê±£¬»ØÍË `navigator.clipboard.read()` ¶ÁÔ­Ê¼¼ôÌù°å£¨²»ÊÜÊÂ¼ş¹ıÂËÓ°Ïì£©£º±éÀú ClipboardItems ÕÒ `image/*|video/*` ÀàĞÍ getType ÄÃ Blob ×ª File ×ßÍ³Ò»Ã½Ìå¹ÜÏß£»¶Á²»µ½£¨Èç×ÊÔ´¹ÜÀíÆ÷ÎÄ¼şÁĞ±í CF_HDROP£¬Òì²½ API ±¾Éí²»Ö§³Ö£©ÔòÌáÊ¾"ÇëÊ¹ÓÃ Ctrl+V"¡£
+- **ÑéÖ¤**£ºÓ²Ë¢ĞÂºó¶¤¶¤½ØÍ¼/¿´Í¼Èí¼şÍ¼Ïñ Ctrl+Shift+V Õı³£½¨¿¨+Á¬Ïß£»ÎÄ×Ö Ctrl+Shift+V Õı³££»×ÊÔ´¹ÜÀíÆ÷ÎÄ¼ş Ctrl+Shift+V ÌáÊ¾¸ÄÓÃ Ctrl+V£¨Æ½Ì¨ÏŞÖÆ£¬ÎŞ·¨ÈÆ¹ı£©¡£
+- **½ÌÑµ**£ºÅÅ²é"¿ì½İ¼ü A ÄÜÌù¡¢¿ì½İ¼ü B ²»ÄÜÌù"£¬ÏÈ´òÈÕÖ¾¿´ paste ÊÂ¼şµÄ `types/files/items`¡ª¡ªÊÂ¼şÅÉ·¢µ«Êı¾İÎª¿Õ = ä¯ÀÀÆ÷Ô¤¹ıÂË£¬²»ÊÇ´úÂë bug¡£sync `event.clipboardData` Óë async `navigator.clipboard.read()` ÄÜÁ¦»¥²¹£ºÇ°ÕßÄÜÄÃÎÄ¼şÁĞ±í£¨½ö Ctrl+V£©£¬ºóÕßÄÜÈÆ¹ı´¿ÎÄ±¾¹ıÂËÄÃÍ¼ÏñÊı¾İ£¨½ö Ctrl+Shift+V ¿ÕÊÂ¼şÊ±£©£¬Á½¸ö API ×éºÏ²ÅÄÜ¸²¸ÇÈ«²¿³¡¾°£¨¼û #61£©¡£
