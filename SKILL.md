@@ -913,3 +913,13 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **修复**：① 画布设置弹窗把默认节点宽/高改回目标值（推荐，只影响该画布）；② 或 F12 控制台 `[...Object.keys(localStorage)].filter(k=>k.startsWith('canvas-settings:')).forEach(k=>localStorage.removeItem(k))` 后硬刷新。
 - **验证**：改设置后新建卡片即为新默认尺寸（素材卡 350×350、生成占位卡 max(240,350)=350×350）。
 - **教训**：① 凡"改了代码里的默认值但行为没变"，先查**持久化层**（localStorage / 服务端配置 / 文档内已存数据）是否覆盖：代码默认值只影响"无覆盖"的场景；② 排查时找一条"无下限/无兜底"的路径做反推锚点（素材卡 = 纯 defaultNodeWidth），能立刻区分"bundle 旧"与"设置覆盖"；③ 画布文档本身也持久化 shape 尺寸——旧卡永远保持创建时尺寸，验证默认尺寸必须**新建**卡片。
+
+### 70. 画布 100% 缩放下截图量尺寸仍偏大：Windows 显示缩放（devicePixelRatio）让截图像素 = CSS 像素 × DPR
+
+- **标签**：`windows` `devicePixelRatio` `截图测量` `显示缩放` `尺寸误判` `arti` `canvas`
+- **项目**：`D:\project\2026\gitlab\arti`（canvas 卡片尺寸验收）
+- **现象**：画布缩放已确认 100%，新建的待生成组（逻辑尺寸 350×350）在用户截图中量出约 517~520px，反馈"默认尺寸还是没生效、大于 500"。
+- **根因**：Windows 显示缩放 150%（`window.devicePixelRatio = 1.5`）下，截图（Win+Shift+S）捕获的是**物理像素**：截图像素 = 画布单位 × 画布缩放 × devicePixelRatio。350 × 1.0 × 1.5 = 525 ≈ 量测值；截图中 13px 占位文字量出约 19.5px 高同样吻合。画布 100% 缩放只保证 1 画布单位 = 1 CSS 像素，不保证 1 CSS 像素 = 1 物理（截图）像素。
+- **修复/排查方法**：不改代码。验收尺寸前先在页面 Console 查 `window.devicePixelRatio`，>1 时截图量测值必须除以 DPR 再和逻辑尺寸对比；或用屏幕对照法（同屏并排放两张已知逻辑尺寸的卡直接比大小）。
+- **验证**：用户确认 `devicePixelRatio` 返回 1.5，350×1.5=525 与截图 517~520 完全吻合，350 设置实际已全链路生效。
+- **教训**：① "尺寸没生效"类反馈的完整换算链是 **画布单位 × 画布缩放（#68）× devicePixelRatio（本条）**，两层缩放都排除后才轮到怀疑代码；② 让用户报尺寸时一律同时要求 `window.devicePixelRatio` 和画布缩放两个数；③ 字号锚点反推法对 DPR 同样有效（13px 文字量出 ~19.5px 即 DPR=1.5）；④ 设置类钳制联动也要留意——minNodeSize=512 会把 defaultNodeWidth 输入的 350 静默钳回 512（`getBoundedNumber(350, minNodeSize, 2000)`），排查设置问题时先把设置面板所有联动项一起看。
