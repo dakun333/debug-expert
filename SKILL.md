@@ -923,3 +923,12 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **修复/排查方法**：不改代码。验收尺寸前先在页面 Console 查 `window.devicePixelRatio`，>1 时截图量测值必须除以 DPR 再和逻辑尺寸对比；或用屏幕对照法（同屏并排放两张已知逻辑尺寸的卡直接比大小）。
 - **验证**：用户确认 `devicePixelRatio` 返回 1.5，350×1.5=525 与截图 517~520 完全吻合，350 设置实际已全链路生效。
 - **教训**：① "尺寸没生效"类反馈的完整换算链是 **画布单位 × 画布缩放（#68）× devicePixelRatio（本条）**，两层缩放都排除后才轮到怀疑代码；② 让用户报尺寸时一律同时要求 `window.devicePixelRatio` 和画布缩放两个数；③ 字号锚点反推法对 DPR 同样有效（13px 文字量出 ~19.5px 即 DPR=1.5）；④ 设置类钳制联动也要留意——minNodeSize=512 会把 defaultNodeWidth 输入的 350 静默钳回 512（`getBoundedNumber(350, minNodeSize, 2000)`），排查设置问题时先把设置面板所有联动项一起看。
+
+### 71. PowerShell 5.1 导出 git 文件内容：`git show > file` 双重破坏（UTF-16LE + GBK 解码乱码）
+
+- **标签**：`powershell` `git` `encoding` `utf-8` `gbk` `乱码` `windows`
+- **现象**：在 PowerShell 5.1 中执行 `git show branch:path > file.tsx` 导出文件后，Read 工具报 "Cannot read binary file"；改用 `Out-File -Encoding utf8` 后文件能读，但中文全部变成 `鍒嗙粍` 这类乱码（mojibake）。
+- **根因**：两层破坏叠加：① PS 5.1 的 `>` 重定向默认写 UTF-16LE，被 Read 工具判为二进制；② 更隐蔽的是原生命令（git）的 stdout 进入 PowerShell 管道时按 `[Console]::OutputEncoding`（中文 Windows 默认 GBK/936）解码，git 输出的 UTF-8 字节被 GBK 误解码成乱码字符串，之后无论用什么编码写文件都无法挽回。
+- **修复**：用 `cmd /c "git show branch:path > \"file\" 2>nul"` —— cmd 的重定向不做编码转换，git 原始字节（UTF-8）原样落盘。或在 PowerShell 中先 `[Console]::OutputEncoding = [Text.Encoding]::UTF8` 再管道导出。
+- **验证**：cmd 导出后 Read 工具正常显示中文；文件字节数与 git blob 原始大小一致（UTF-8 无 BOM）。
+- **教训**：① Windows 中文系统上 PowerShell 管道接原生命令输出 = 默认 GBK 解码，凡涉及非 ASCII 内容（中文注释、i18n 字符串）必须用 cmd /c 直通或先改 OutputEncoding；② `Get-Content`/`Select-String` 读 UTF-8 无 BOM 文件同样按 GBK 解码，行数统计都可能失真，校验文件用 `[IO.File]::ReadAllLines` + 显式 UTF8；③ 纯 ASCII 文件不受此坑影响。
