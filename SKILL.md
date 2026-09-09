@@ -932,3 +932,12 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **修复**：用 `cmd /c "git show branch:path > \"file\" 2>nul"` —— cmd 的重定向不做编码转换，git 原始字节（UTF-8）原样落盘。或在 PowerShell 中先 `[Console]::OutputEncoding = [Text.Encoding]::UTF8` 再管道导出。
 - **验证**：cmd 导出后 Read 工具正常显示中文；文件字节数与 git blob 原始大小一致（UTF-8 无 BOM）。
 - **教训**：① Windows 中文系统上 PowerShell 管道接原生命令输出 = 默认 GBK 解码，凡涉及非 ASCII 内容（中文注释、i18n 字符串）必须用 cmd /c 直通或先改 OutputEncoding；② `Get-Content`/`Select-String` 读 UTF-8 无 BOM 文件同样按 GBK 解码，行数统计都可能失真，校验文件用 `[IO.File]::ReadAllLines` + 显式 UTF8；③ 纯 ASCII 文件不受此坑影响。
+### 72. arti 重启 3013 dev server 后“修改没生效”：`pnpm dev` 默认起在 3011，3013 必须显式 `--port 3013`
+
+- **标签**：`arti` `vite` `dev-server` `port` `3013` `restart` `windows`
+- **项目**：`D:\project\2026\gitlab\arti`
+- **现象**：杀掉旧的 3013 vite 进程后用 `pnpm dev` 重启，3013 一直无监听，用户硬刷新 3013 看到的还是旧页面（“修改没生效”）。
+- **根因**：arti 的 `pnpm dev` 脚本不带端口参数，vite 默认起在 **3011**；用户日常的 3013 是当初用 `pnpm dev --port 3013` 显式指定的（旧进程 CommandLine 可见 `--port 3013`）。误起在 3011 时 3013 无服务，浏览器可能命中旧缓存/旧 tab。
+- **修复**：重启 3013 的正确命令是 `pnpm dev --port 3013`（或用户自己的启动方式）；后台拉起：`Start-Process cmd -ArgumentList '/c','pnpm dev --port 3013 > log 2>&1' -WindowStyle Hidden`，再用 `Get-NetTCPConnection -LocalPort 3013 -State Listen` 验证。
+- **验证**：PID 4668 监听 3013，日志确认 VITE ready。
+- **教训**：① 替用户重启 dev server 前先查旧进程 CommandLine 的完整参数（`Get-CimInstance Win32_Process`），端口/模式参数一个都不能丢；② “修改没生效”先确认浏览器连的端口确实跑着新进程（端口无监听时浏览器可能静默用缓存）；③ Start-Process 直接调 `pnpm`（无 .cmd 后缀）会静默失败，一律走 `cmd /c`。
