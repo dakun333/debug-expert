@@ -931,7 +931,7 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **根因**：两层破坏叠加：① PS 5.1 的 `>` 重定向默认写 UTF-16LE，被 Read 工具判为二进制；② 更隐蔽的是原生命令（git）的 stdout 进入 PowerShell 管道时按 `[Console]::OutputEncoding`（中文 Windows 默认 GBK/936）解码，git 输出的 UTF-8 字节被 GBK 误解码成乱码字符串，之后无论用什么编码写文件都无法挽回。
 - **修复**：用 `cmd /c "git show branch:path > \"file\" 2>nul"` —— cmd 的重定向不做编码转换，git 原始字节（UTF-8）原样落盘。或在 PowerShell 中先 `[Console]::OutputEncoding = [Text.Encoding]::UTF8` 再管道导出。
 - **验证**：cmd 导出后 Read 工具正常显示中文；文件字节数与 git blob 原始大小一致（UTF-8 无 BOM）。
-- **教训**：① Windows 中文系统上 PowerShell 管道接原生命令输出 = 默认 GBK 解码，凡涉及非 ASCII 内容（中文注释、i18n 字符串）必须用 cmd /c 直通或先改 OutputEncoding；② `Get-Content`/`Select-String` 读 UTF-8 无 BOM 文件同样按 GBK 解码，行数统计都可能失真，校验文件用 `[IO.File]::ReadAllLines` + 显式 UTF8；③ 纯 ASCII 文件不受此坑影响。
+- **教训**：① Windows 中文系统上 PowerShell 管道接原生命令输出 = 默认 GBK 解码，凡涉及非 ASCII 内容（中文注释、i18n 字符串）必须用 cmd /c 直通或先改 OutputEncoding；② `Get-Content`/`Select-String` 读 UTF-8 无 BOM 文件同样按 GBK 解码，行数统计都可能失真，校验文件用 `[IO.File]::ReadAllLines` + 显式 UTF8；③ 纯 ASCII 文件不受此坑影响；④ 就地修改含中文文件同样中招——`(Get-Content -Raw) -replace ... | Set-Content -Encoding UTF8` 会把中文注释替换成乱码并吞掉换行（2026-09-09 在 arti CanvasImageWorkflowActions.tsx 实操翻车），文件内容修改一律用专用 edit/write 工具，禁用 PowerShell 文本处理管线。
 ### 72. arti 重启 3013 dev server 后“修改没生效”：`pnpm dev` 默认起在 3011，3013 必须显式 `--port 3013`
 
 - **标签**：`arti` `vite` `dev-server` `port` `3013` `restart` `windows`
