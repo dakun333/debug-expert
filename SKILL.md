@@ -951,3 +951,12 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **修复**：应用层对 OSS PUT 做有限重试（网络错误/5xx 重试 2 次、400ms 递增退避，签名类 4xx 不重试，重试总时长远小于签名有效期）——已在 `page.tsx uploadCanvasMedia` 落地。环境侧若频繁复现：查 VPN/代理切换或换 DNS。
 - **排查方法**：① 先翻 dev server 日志找 `http proxy error` 的真实 Error（500 只是代理的表象）；② `node -e "require('dns').lookup('<host>',(e,a)=>console.log(e||a))"` 多次验证 Node 侧 DNS；③ 无签名探针 PUT（小 body）拿到 OSS 真实 403 = 代理链路本身正常。
 - **教训**：① 本地代理链路的 5xx 不要只盯浏览器控制台，dev server 日志才有上游真实错误；② "Node 进程 DNS 失败但系统其它程序正常" 在 Windows + VPN 环境下很常见，别把环境锅当代码 bug 排；③ 经代理的上传/下载类调用，凡是网络错误/5xx 都应默认带有限重试。
+
+### 74. opencode bash 工具中 Start-Process 后台启动进程：报 "Unknown: ChildProcess.kill" 但进程实际存活
+
+- **标签**：`opencode` `start-process` `后台进程` `childprocess-kill` `windows` `vite`
+- **现象**：在 opencode bash 工具（PowerShell 5.1）里用 `Start-Process node ... -WindowStyle Hidden -RedirectStandardOutput/Error` 后台拉起 vite dev server，工具调用返回 `Unknown: ChildProcess.kill (...)`，看似启动失败；但随后单独查询端口，进程实际在监听、日志正常（VITE ready）。
+- **根因**：bash 工具在命令结束时尝试清理其子进程树并把清理动作报告为错误；Start-Process 启动的独立进程已脱离调用方，实际幸存。该报错不等于启动失败。
+- **修复**：启动与验证分两次工具调用——第一次只做 Start-Process（无视 ChildProcess.kill 报错），第二次用 `Get-NetTCPConnection -LocalPort <port> -State Listen` + `Invoke-WebRequest` 验证。避免在同一条命令里 Start-Process 后紧跟长 Start-Sleep 再读日志。
+- **验证**：2026-09-10 aigc_design_canvas 项目 3013 端口 vite HTTP 200，进程独立于 shell 存活。
+- **教训**：① 该工具环境下"报错文本"和"实际失败"要分开确认，以端口/HTTP 探测为准；② 后台启动一律 `Start-Process ... -WindowStyle Hidden` + 日志重定向，验证放下一轮调用。
