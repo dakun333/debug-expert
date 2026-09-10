@@ -941,3 +941,13 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **修复**：重启 3013 的正确命令是 `pnpm dev --port 3013`（或用户自己的启动方式）；后台拉起：`Start-Process cmd -ArgumentList '/c','pnpm dev --port 3013 > log 2>&1' -WindowStyle Hidden`，再用 `Get-NetTCPConnection -LocalPort 3013 -State Listen` 验证。
 - **验证**：PID 4668 监听 3013，日志确认 VITE ready。
 - **教训**：① 替用户重启 dev server 前先查旧进程 CommandLine 的完整参数（`Get-CimInstance Win32_Process`），端口/模式参数一个都不能丢；② “修改没生效”先确认浏览器连的端口确实跑着新进程（端口无监听时浏览器可能静默用缓存）；③ Start-Process 直接调 `pnpm`（无 .cmd 后缀）会静默失败，一律走 `cmd /c`。
+
+### 73. arti 本地代理 OSS 上传偶发 500：dev server（Node 进程）间歇性 DNS 解析失败，查 vite 日志定位
+
+- **标签**：`arti` `vite` `proxy` `oss-upload` `dns` `ENOTFOUND` `500` `windows` `network`
+- **项目**：`D:\project\2026\gitlab\arti`
+- **现象**：画布编辑保存时浏览器控制台报 `PUT http://localhost:3013/oss-upload/<host>/<path>?Expires=...&Signature=... 500 (Internal Server Error)`，图片保存失败；同一签名 URL 用 PowerShell 直连 OSS 正常（403/200 都有响应），浏览器加载图片也正常。
+- **根因**：`/oss-upload` 是 vite http-proxy 转发到 OSS 的本地代理。**dev server 的 Node 进程间歇性 `getaddrinfo ENOTFOUND caikuai-tucool.oss-cn-beijing.aliyuncs.com`**（VPN/DNS 波动），http-proxy 上游连接失败一律回 500。vite 日志（后台启动时重定向的 log 文件）里有明确记录：`[vite] http proxy error: <path>` + `Error: getaddrinfo ENOTFOUND ...`。与请求体大小、签名是否过期无关（DNS 失败发生在发字节之前）；浏览器/PowerShell 走的是系统 DNS，所以其它途径访问同域名完全正常，容易误判成代码 bug。
+- **修复**：应用层对 OSS PUT 做有限重试（网络错误/5xx 重试 2 次、400ms 递增退避，签名类 4xx 不重试，重试总时长远小于签名有效期）——已在 `page.tsx uploadCanvasMedia` 落地。环境侧若频繁复现：查 VPN/代理切换或换 DNS。
+- **排查方法**：① 先翻 dev server 日志找 `http proxy error` 的真实 Error（500 只是代理的表象）；② `node -e "require('dns').lookup('<host>',(e,a)=>console.log(e||a))"` 多次验证 Node 侧 DNS；③ 无签名探针 PUT（小 body）拿到 OSS 真实 403 = 代理链路本身正常。
+- **教训**：① 本地代理链路的 5xx 不要只盯浏览器控制台，dev server 日志才有上游真实错误；② "Node 进程 DNS 失败但系统其它程序正常" 在 Windows + VPN 环境下很常见，别把环境锅当代码 bug 排；③ 经代理的上传/下载类调用，凡是网络错误/5xx 都应默认带有限重试。
