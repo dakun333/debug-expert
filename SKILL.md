@@ -960,3 +960,27 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **修复**：启动与验证分两次工具调用——第一次只做 Start-Process（无视 ChildProcess.kill 报错），第二次用 `Get-NetTCPConnection -LocalPort <port> -State Listen` + `Invoke-WebRequest` 验证。避免在同一条命令里 Start-Process 后紧跟长 Start-Sleep 再读日志。
 - **验证**：2026-09-10 aigc_design_canvas 项目 3013 端口 vite HTTP 200，进程独立于 shell 存活。
 - **教训**：① 该工具环境下"报错文本"和"实际失败"要分开确认，以端口/HTTP 探测为准；② 后台启动一律 `Start-Process ... -WindowStyle Hidden` + 日志重定向，验证放下一轮调用。
+
+### 75. dsh（DeepSeek Harness）升级后无法创建新对话：用户层 settings.yaml 引用的 app 目录 ID 被改名/删除，且校验是延迟的
+
+- **标签**：`dsh` `deepseek-harness` `升级` `settings.yaml` `agent-presets` `兼容性` `延迟校验` `配置迁移`
+- **现象**：`npm install -g @deepseek-ai/dsh@latest` 从 0.1.1-rc.2 升到 0.1.5-rc.1 后，Web UI 无法创建新对话。启动**无任何报错**、端口正常、页面 200、stderr 干净；只有实际创建会话时才失败。
+- **根因**（三层叠加）：
+  1. **升级不迁移用户层配置**：app 代码在 npm 全局目录，用户配置在 `$DSH_HOME/settings.yaml`（`C:\Users\EDY\.dsh\settings.yaml`），npm 升级只换代码、永不触碰用户配置。用户配置里引用的是 app 随附目录的 ID（preset id、permission preset id、协议名、模型 id 等），app 侧改名/删除后引用即断。
+  2. **预设目录变更**：0.1.1 随附 presets 为 `code/cordis/minimal/standard`，0.1.5 变为 `cordis/minimal/ptc/standard`——`code` 被删。旧 `code/preset.yml` 的显示名是「PTC 模式」，其真正继任者是 **`ptc`**（不是名字更像的 `standard`）。用户 settings.yaml 里 `agent-presets.default: code` 因此失效。
+  3. **延迟校验（lazy validation）**：settings 加载时只做 schema 形状校验（`default: code` 是合法字符串，照常通过），目录 ID 的解析推迟到**首次使用**（创建会话时 `presets.resolve()` 才报 `agent-preset/not-found`）。这是 dsh 的既定设计（模型配置同理："无法解析的模型保留在可编辑配置中，直接请求时才失败"）。所以启动日志干净 ≠ 配置有效。
+- **修复**：`settings.yaml` 中 `agent-presets.default: code` → `ptc`。settings 经 settings seam 每次操作热读取，改完**无需重启**即生效。
+- **排查方法（可复用，无浏览器自动化也能全链路验证 dsh）**：
+  1. 新版 Web UI 有 process-token 认证：从启动 stdout 拿 `http://127.0.0.1:3080/?token=xxx`（token 每次重启都变）；`curl -c cookies.txt "…/?token=xxx"`（303 + set-cookie）换 cookie，之后 `curl -b cookies.txt` 访问 API。不带 cookie 的 API 请求一律 401。
+  2. RPC 协议：`POST /api/<namespace>/<method>`，body 为 `{"type":"client-request","rpcId":"t1","method":"<ns>/<method>","payload":{"args":{…}}}`；session 类方法的参数还要再包一层 `{"args":{"request":{…}}}`。
+  3. 复现 UI 报错：`session/create`（参数名是 `agentPreset` 不是 `presetId`，传错会静默走配置默认值）；验证模型配置：`session/modelCatalog`（列出全部 provider/模型/effort）、`session/selectModel`（实测某个 provider+model+effort 能否解析）。
+  4. 比对新旧版本的目录内容：`npm view @deepseek-ai/dsh@<旧版本> dist.tarball` 下载旧 tarball 解开对比（旧版随附目录在 `package/config/agent-presets/`，新版移到了依赖包 `dsh-agent-presets/presets/`）。
+- **dsh 升级后核对清单（每次升级必做）**：
+  1. `agent-presets.default` 的 id 在新版 presets 目录里存在（看显示名找继任者，别按 id 字面猜）
+  2. `permission.defaultPreset` 仍是合法 preset（当前：`danger-full-access` 等）
+  3. `agent-default-model` 的 provider/model/reasoningEffort 用 `session/selectModel` 实测能解析
+  4. `llm-pi-ai` 各字段仍合法：`api`（`openai-completions` 等）、`compat.thinkingFormat`（openai/deepseek/openrouter/together/baseten/zai/qwen/chat-template）、`input: [text, image]`、`apiKeyEnv` 对应凭据存在
+  5. `ui-theme.preference`（light/dark/system）、`ui-conversation.busyEnter`（queue/steer）等枚举值未变
+  6. 最后用 `session/create` 实测一次创建会话（这是 UI"新建对话"的真实路径）
+- **验证**：2026-09-10 修为 `ptc` 后，`session/create` 返回 `agentPreset: "ptc"` 成功；`session/selectModel` 对 `hungry/glm-5.3-flash/max`（配置默认）和 `hungry/gpt-5.6-luna/max` 均解析成功；modelCatalog 列出 hungry 全部 11 个模型无错误。
+- **教训**：① **升级 ≠ 迁移**：凡是"用户配置引用 app 内置目录 ID"的架构（dsh、Claude Code 等），app 升级改名/删除目录项都会静默破坏用户配置，升级后必须逐项核对引用；② **启动无报错不代表配置有效**——dsh 是延迟校验，关键路径（创建会话、选模型）必须实测；③ 找改名继任者要看**显示名/描述**（`code` 显示名「PTC 模式」→ 新 `ptc`），按 id 字面相似度猜（code→standard）会改错用户意图；④ 官方 README 明示 developer preview 阶段 "THERE WILL BE COMPATIBILITY-BREAKING CHANGES"，每次升级都按清单过一遍。
