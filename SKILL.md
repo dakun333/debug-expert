@@ -808,6 +808,7 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
   4. 或用 vite dev server 请求模块 URL 验证编译（见 #39）。
 - **验证**：过滤后改动文件非 ␍ 错误 0 条；`tsc --noEmit --skipLibCheck` 通过。
 - **教训**：arti 仓库在本机 lint 验证的基线是「除 ␍ 外无错误」，不是「零错误」；判断改动是否破坏 lint 必须先过滤行结尾噪音。
+- **变体（2026-09-11 aigc_design_canvas 实证）**：`git merge` 合入对方分支的 7 个文件后 eslint 爆 3314 条 `Delete ␍`。先用 `git ls-files --eol <file>` 确认 `i/lf`（仓库 blob 本来就是 LF），此时对这批文件跑 `node node_modules/prettier/bin/prettier.cjs --write` 是**零风险**的（写回 LF 与 blob 一致，不产生 diff），eslint 直接归零，比"过滤噪音"更干净。⚠️ 但 prettier --write 后会出现**幻影 M**：`git status` 显示这些文件 M、`git diff` 为空、`git hash-object` 与 index hash 相同、`git update-index --refresh/--really-refresh` 仍报 `needs update`——这是 stat 缓存幻象，**`git add <files>` 即可清除**（实际 staged 为空，不产生新提交）。判断流程：ls-files --eol 看 i/lf → prettier --write → eslint 复验 → git add 清幻象。
 
 ### 59. `axios.create()` 继承全局 `axios.defaults.baseURL='/api'` — OSS 同源代理路径被拼成 `/api/oss-upload/...` 404
 
