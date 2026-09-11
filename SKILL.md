@@ -578,6 +578,7 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
   ```
   esbuild 二进制在 `.pnpm/@esbuild+win32-x64@0.25.12/node_modules/@esbuild/win32-x64/esbuild.exe`（optionalDeps），即使 postinstall 被忽略也能被 esbuild 主包 fallback 找到，vite 正常工作。
   若要恢复 `pnpm dev`：先 `pnpm approve-builds` 批准脚本（或手动把 `pnpm-workspace.yaml` 的 `allowBuilds` 改成 `true/false`）。
+  补充（2026-09-11 验证）：`pnpm exec eslint` / `pnpm exec <任何命令>` 同样会在执行前跑 deps status check 而失败，绕过方式相同——直接 `node node_modules/<pkg>/bin/<cli>.js <args>`（如 `node node_modules/eslint/bin/eslint.js <file>`）。
 - **验证**：vite 以 612ms 启动，`http://localhost:3012/` 返回 200；`git status` 干净。
 - **教训**：Windows 上 git 克隆 + pnpm 项目，"只装依赖不动代码"也会产生工作区改动（pnpm-workspace.yaml 被注入）。跑完 install 后必须 `git status` 检查并还原，或用 node 直接跑 vite 绕开 pnpm 的 build 检查。
 
