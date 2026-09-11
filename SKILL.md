@@ -579,6 +579,7 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
   esbuild 二进制在 `.pnpm/@esbuild+win32-x64@0.25.12/node_modules/@esbuild/win32-x64/esbuild.exe`（optionalDeps），即使 postinstall 被忽略也能被 esbuild 主包 fallback 找到，vite 正常工作。
   若要恢复 `pnpm dev`：先 `pnpm approve-builds` 批准脚本（或手动把 `pnpm-workspace.yaml` 的 `allowBuilds` 改成 `true/false`）。
   补充（2026-09-11 验证）：`pnpm exec eslint` / `pnpm exec <任何命令>` 同样会在执行前跑 deps status check 而失败，绕过方式相同——直接 `node node_modules/<pkg>/bin/<cli>.js <args>`（如 `node node_modules/eslint/bin/eslint.js <file>`）。
+  补充 2（2026-09-11 aigc_design_canvas 实证）：**`onlyBuiltDependencies` 即使已列全所有包也无效**——pnpm 11.11 只认新的 `allowBuilds` 字段；husky pre-commit（`pnpm exec lint-staged`）因此必然失败、`git commit` 被钩子拒绝；`npm_config_verify_deps_before_run=false` 环境变量也无效。唯一修复：`pnpm-workspace.yaml` 添加 `allowBuilds: { '<pkg>': true, ... }`（每个报错的包设 true）。修复后 `pnpm install` 会真正执行这些包的 postinstall（esbuild/@parcel/watcher/unrs-resolver 构建成功），lint-staged 正常跑通。allowBuilds 配置是否提交仓库由团队决定（提交可修复全员同坑）。
 - **验证**：vite 以 612ms 启动，`http://localhost:3012/` 返回 200；`git status` 干净。
 - **教训**：Windows 上 git 克隆 + pnpm 项目，"只装依赖不动代码"也会产生工作区改动（pnpm-workspace.yaml 被注入）。跑完 install 后必须 `git status` 检查并还原，或用 node 直接跑 vite 绕开 pnpm 的 build 检查。
 
@@ -961,6 +962,28 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **修复**：启动与验证分两次工具调用——第一次只做 Start-Process（无视 ChildProcess.kill 报错），第二次用 `Get-NetTCPConnection -LocalPort <port> -State Listen` + `Invoke-WebRequest` 验证。避免在同一条命令里 Start-Process 后紧跟长 Start-Sleep 再读日志。
 - **验证**：2026-09-10 aigc_design_canvas 项目 3013 端口 vite HTTP 200，进程独立于 shell 存活。
 - **教训**：① 该工具环境下"报错文本"和"实际失败"要分开确认，以端口/HTTP 探测为准；② 后台启动一律 `Start-Process ... -WindowStyle Hidden` + 日志重定向，验证放下一轮调用。
+
+### 75. tldraw 画布 HTMLContainer 内 video controls 点不动 + shape util 修改后 HMR"不生效"假象
+
+- **标签**：`tldraw` `canvas` `video` `controls` `setPointerCapture` `pointer-events` `hmr` `fast-refresh` `arti-aigc`
+- **项目**：`D:\project\2026\gitlab\aigc_design_canvas`（TuCool 画布，tldraw v5.3.1，React 19）
+- **现象**：生成器卡（CanvasGroupShapeUtil）结果区的 `<video controls>` 播放/进度/音量/全屏按钮全部点不动；但上传的视频素材卡（CanvasNodeShapeUtil）的 video controls 可以正常播放。加了 React `stopPropagation` 修复后用户测试"仍然不动"。
+- **根因（两层）**：
+  1. **事件层**：tldraw 容器的 `onPointerDown`（React 合成事件）会 `setPointerCapture` 到容器并进入选择/拖拽手势；HTMLContainer 内裸 video 的 click 序列被夺走，controls 永不响应。仅 `stopPropagation` 不够，必须把指针捕获到 video 自身。
+  2. **HMR 假象层**：shape util 文件含 class 导出（Fast Refresh 不兼容），vite 只推 `hmr update`（局部替换）而**没有 `page reload`**——tldraw editor 实例持有旧 ShapeUtil 类，修复代码根本没在跑，造成"修了也没用"的假象。vite 日志里找 `page reload` 才能确认整页刷新。
+- **修复（复刻素材卡已验证配方，缺一不可）**：
+  ```tsx
+  onPointerDown={(e) => {
+    editor.markEventAsHandled(e);          // tldraw 容器处理器首行检查此标记
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);  // 关键：click 稳定派发到 video
+    editor.run(() => editor.setSelectedShapes([shape.id]), { history: 'ignore' });  // 保持点选卡片行为
+  }}
+  onClick/onPointerUp/onPointerMove/onPointerCancel={(e) => e.stopPropagation()}
+  ```
+  SCSS 给媒体元素显式 `pointer-events: auto`。
+- **HMR 假象排查法**：① 看 vite 日志是 `hmr update` 还是 `page reload`——class ShapeUtil 变更必须硬刷新（Ctrl+Shift+R）才会重建 editor；② 验证 dev server 模块是否含新代码时，搜**本次新增的独特字符串**（如注释文字），别搜文件里本来就有的标记（曾用 `markEventAsHandled` 计数验证，原文件已有 9 处，白高兴一场）；③ 改 canvas 交互先确认浏览器跑新代码，再怀疑事件模型；④ 临时加 `data-xxx` 属性让用户在 devtools 确认新代码已加载，验证后再删掉。
+- **验证**：`data-video-fix` 标记确认新代码加载后，controls 全部可点；提交 `eacccff`。
 
 ### 75. dsh（DeepSeek Harness）升级后无法创建新对话：用户层 settings.yaml 引用的 app 目录 ID 被改名/删除，且校验是延迟的
 
