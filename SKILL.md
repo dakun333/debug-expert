@@ -605,6 +605,7 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **修复**：重启 dev server。`Get-NetTCPConnection -LocalPort 3012 -State Listen` 找占用 PID → `Stop-Process` → 在项目目录后台重启 `node node_modules/vite/bin/vite.js --port 3012 --open false`（见 #37 绕开 pnpm 的方式）。重启后再 `curl` 该模块 URL，确认返回完整 JS（本例恢复 73KB）。
 - **验证**：`curl` 模块 URL 由 14 字节恢复到完整代码；页面正常渲染。
 - **教训**：dev server 长期运行 + 反复 HMR 后页面莫名白屏崩溃、且服务端日志无报错时，**先 curl 该模块 URL 看返回内容是否异常/为空**，比猜代码快得多；再考虑重启 server。
+- **变体（2026-09-11 aigc_design_canvas 实证）**：SCSS 模块 HMR 丢失——tsx 的 HMR 生效（新文案可见）但 `.module.scss` 第二次变更未进入 vite 模块图，`styles.新类名` 为 `undefined`，`classNames={{ container: styles.新类名 }}` 静默落空（antd Popover 弹层保持默认白色，"改了样式不生效"）。排查：`curl http://localhost:PORT/src/.../index.module.scss` 用 `$c.Contains('新类名')` 验证 CSS 是否含新增类（注意用 Contains，PowerShell `-match` 对 vite 响应内容有误报）。修复同样是重启 dev server，重启后 curl 复验类名出现即可。教训：**tsx 生效 ≠ scss 生效**，改样式类名后用户报"没变化"时先 curl scss 模块确认类名，再重启。
 
 ### 40. antd Input 的 className 直接落在最外层元素上，SCSS Module 却写"后代选择器"，导致描边/圆角覆盖不生效
 
