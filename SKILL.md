@@ -1011,3 +1011,15 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
   6. 最后用 `session/create` 实测一次创建会话（这是 UI"新建对话"的真实路径）
 - **验证**：2026-09-10 修为 `ptc` 后，`session/create` 返回 `agentPreset: "ptc"` 成功；`session/selectModel` 对 `hungry/glm-5.3-flash/max`（配置默认）和 `hungry/gpt-5.6-luna/max` 均解析成功；modelCatalog 列出 hungry 全部 11 个模型无错误。
 - **教训**：① **升级 ≠ 迁移**：凡是"用户配置引用 app 内置目录 ID"的架构（dsh、Claude Code 等），app 升级改名/删除目录项都会静默破坏用户配置，升级后必须逐项核对引用；② **启动无报错不代表配置有效**——dsh 是延迟校验，关键路径（创建会话、选模型）必须实测；③ 找改名继任者要看**显示名/描述**（`code` 显示名「PTC 模式」→ 新 `ptc`），按 id 字面相似度猜（code→standard）会改错用户意图；④ 官方 README 明示 developer preview 阶段 "THERE WILL BE COMPATIBILITY-BREAKING CHANGES"，每次升级都按清单过一遍。
+
+### 76. Vitest 动态 import 重组件（拉 tldraw 运行时）导致测试超时 30s+，改用「静态 import + 全量 vi.mock」或 readFileSync 源码契约
+
+- **标签**：`vitest` `tldraw` `动态import` `超时` `vi.mock` `readFileSync` `源码契约` `jsdom`
+- **现象**：在 vitest 测试里 `await import('@/views/canvas/_components/CanvasImageEditCard/CanvasImageEditCard')` 想拿一个常量，单个用例跑到 17974ms 超时（默认 15s）；同一文件多个用例各自 `await import` 同一模块，前几个用例全部超时、后面的反而秒过（模块缓存生效后）。整个文件耗时 80s+。
+- **根因**：目标组件 import 链拉起 tldraw 真实模块（加载需 30s+）+ 整个页面运行时。vitest 每个 `await import` 在没有 mock 时都会走真实解析，首个用例承担全部加载成本就超时；后续用例命中模块缓存才快。另外 jsdom 未实现 `CSS.supports`，真实 tldraw 模块加载期直接调用会抛错。
+- **修复（按被测目标二选一）**：
+  1. **只测常量/字符串/正则锚点** → 不 import 组件，用 `readFileSync(resolve(process.cwd(), path), 'utf8')` 读源码做契约断言（先例 `src/components/WorkflowImageEditor/__test__/native-contract.test.ts` 的 `readSource` 模式）。注意 Windows 下 `.replace(/\r\n/g, '\n')` 归一化换行。
+  2. **要测导出的函数行为** → 文件顶部**静态 import** + `vi.mock('tldraw', () => ({...}))` 全量桩（不用 `importOriginal`，那还是会加载真实模块 30s+）。桩清单按被测组件实际用到的导出给：`BaseBoxShapeUtil`/`HTMLContainer`/`Rectangle2d`/`Geometry2d`/`T`（Proxy 链式 validator）/`useEditor`/`useValue`，行为桩（如 `getArrowBindings`）用 `vi.hoisted` 的表驱动。jsdom 缺 `CSS.supports` 时在 mock 工厂里先补 `globalScope.CSS.supports = () => false`。静态 import 在 collect 阶段加载一次，25 个用例总共 7ms。
+- **RTL 查询配套坑（同一次回归套件踩的）**：① antd 图标自带 `aria-label`（如 `edit`）会并入宿主按钮可访问名（`getByRole('button', { name: '图像编辑' })` 找不到，真实名是 `edit 图像编辑`）→ 用 `{ name: /图像编辑/ }` 正则匹配；② 自定义 Select 的 toggle 按钮和 listbox 容器常共享同一 `aria-label`，`getByLabelText` 命中多元素 → 用 `getByRole('button', { name: ... })` 锁定 toggle；③ 组件有「选中才显示」的 chrome 隐藏逻辑（如画布生成器卡 `isGenerationChromeHidden`）时，mock editor 的 `getSelectedShapeIds` 必须包含该卡片 id，否则渲染返回 null。
+- **教训**：vitest 里**禁止对拉 tldraw 运行时的组件做动态 import**；能 readFileSync 锚定的就不加载组件，必须加载的就静态 import + 全量 mock，不要 `importOriginal`。
+- **验证**：aigc_design_canvas 画布回归套件（`src/views/canvas/__test__/canvas-regression/`）70 用例总耗时 4.4s（改造前单文件 80s+ 且 3 个超时）。
