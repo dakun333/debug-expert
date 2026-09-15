@@ -1036,3 +1036,11 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
   3. **去重基线是单画布状态**：切换/新建画布必须重置（否则新画布内容与旧画布序列化恰好一致时首次真实保存被误跳过）。
 - **教训**：① 「防抖」只整形不限量，凡是「监听→防抖→网络请求」链路都要问一句：源头发疯了怎么办？答案=拖尾节流（限频）+ 内容指纹去重（免发）；② 内容指纹跳过的返回值要想清楚调用方语义（此处钉快照需要的是「包含该内容的版本号」，指纹一致时当前版本即答案）；③ 回归锚点用源码契约：常量名/比较表达式/重置点三件套，防后续重构把防御删掉。
 - **验证**：回归 102/102（新增 3 条契约断言）；tsc/eslint 全绿；dev server 重启后模块已含新代码。
+
+### 78. curl/探针验证 vite dev server 模块内容时：esbuild transform 会把单引号字符串改写成双引号，锚点必须兼容两种引号
+
+- **标签**：`vite` `esbuild` `transform` `探针` `引号` `假阴性` `aigc_design_canvas`
+- **现象**：源码刚改完（如 `editorLayout.editor.mode === 'outpaint' ? 'crop' : ...`），用 `Invoke-WebRequest .../page.tsx` + `-match "outpaint'\s*\?\s*'crop'"` 验证 dev server 是否吐新代码，返回 False，疑似「模块没更新/缓存损坏」；实际模块已是新代码——esbuild transform 把字符串字面量统一转成了**双引号**（`"outpaint" ? "crop"`）。
+- **修复/口径**：验证 dev server 输出的锚点遵守 #49「ASCII 锚点」原则之外，还要**引号中立**：匹配标识符/注释/结构（如 `maskSessionProps`、`getCanvasImageEditToolbarTools`），或正则里用 `['"]` 兼容两种引号；不要直接把源码里的单引号片段当锚点。
+- **教训**：「dev server 没吐新代码」下结论前，先把响应里目标附近的实际文本打出来看一眼（引号、换行、标识符 rename 都可能与源码不同）；另：PowerShell 里 `node -e` 嵌套引号必坏，复杂探针写临时 `.mjs` 文件再 `node file.mjs`。
+- **验证**：改用 `maskSessionProps` 标识符锚点后立刻确认新代码已上线（ternary 确实以双引号形式存在）。
