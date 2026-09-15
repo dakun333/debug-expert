@@ -1023,3 +1023,16 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **RTL 查询配套坑（同一次回归套件踩的）**：① antd 图标自带 `aria-label`（如 `edit`）会并入宿主按钮可访问名（`getByRole('button', { name: '图像编辑' })` 找不到，真实名是 `edit 图像编辑`）→ 用 `{ name: /图像编辑/ }` 正则匹配；② 自定义 Select 的 toggle 按钮和 listbox 容器常共享同一 `aria-label`，`getByLabelText` 命中多元素 → 用 `getByRole('button', { name: ... })` 锁定 toggle；③ 组件有「选中才显示」的 chrome 隐藏逻辑（如画布生成器卡 `isGenerationChromeHidden`）时，mock editor 的 `getSelectedShapeIds` 必须包含该卡片 id，否则渲染返回 null。
 - **教训**：vitest 里**禁止对拉 tldraw 运行时的组件做动态 import**；能 readFileSync 锚定的就不加载组件，必须加载的就静态 import + 全量 mock，不要 `importOriginal`。
 - **验证**：aigc_design_canvas 画布回归套件（`src/views/canvas/__test__/canvas-regression/`）70 用例总耗时 4.4s（改造前单文件 80s+ 且 3 个超时）。
+
+### 77. 防抖自动保存被打成秒级高频风暴：「store 监听→防抖→POST」链路必须加拖尾节流 + 序列化内容去重双保险
+
+- **标签**：`debounce` `autosave` `save-storm` `高频请求` `tldraw` `store-listen` `aigc_design_canvas` `防御性设计`
+- **项目**：`D:\project\2026\gitlab\aigc_design_canvas`（画布 `/canvas/document/save`）
+- **现象**：Network 面板 1088/1107 个请求全是 document/save，连续无间隔；用户未做任何编辑也照刷。
+- **根因（架构层）**：保存链路是「tldraw store 监听（任何 document 变更）→ 300ms 防抖 → 无条件 POST」。画布内写入方极多（运行轮询回填、面板字段回写、尺寸 ResizeObserver 回写、连线克隆、编辑卡 autosave），**只要任一写入方产生非幂等/周期性变更**（如轮询里 `JSON.stringify(outputs)` 每次不同、卡住的 run 永远轮询），防抖就只能整形不能限量，保存被打成连发。逐个写入方排查「是否幂等」不可维护——必须假设写入方会异常。
+- **修复（两层防御，写入方异常也能止血）**：
+  1. **拖尾节流**：`scheduleCanvasSave` 调度延迟 = `Math.max(300, MIN_INTERVAL - (now - lastPostStartedAt))`（MIN_INTERVAL=3000ms）。正常编辑距上次保存远超阈值 → 行为与纯 300ms 防抖一致；异常循环下保存频率封顶 1 次/3s。
+  2. **内容去重**：`persistCanvasSnapshot` 发 POST 前 `JSON.stringify({document, viewport})` 与上次成功持久化的快照比较，一致直接跳过并返回当前版本（运行前钉快照语义不受影响——版本对应的正是相同内容）。
+  3. **去重基线是单画布状态**：切换/新建画布必须重置（否则新画布内容与旧画布序列化恰好一致时首次真实保存被误跳过）。
+- **教训**：① 「防抖」只整形不限量，凡是「监听→防抖→网络请求」链路都要问一句：源头发疯了怎么办？答案=拖尾节流（限频）+ 内容指纹去重（免发）；② 内容指纹跳过的返回值要想清楚调用方语义（此处钉快照需要的是「包含该内容的版本号」，指纹一致时当前版本即答案）；③ 回归锚点用源码契约：常量名/比较表达式/重置点三件套，防后续重构把防御删掉。
+- **验证**：回归 102/102（新增 3 条契约断言）；tsc/eslint 全绿；dev server 重启后模块已含新代码。
