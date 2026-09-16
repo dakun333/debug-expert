@@ -1044,3 +1044,15 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **修复/口径**：验证 dev server 输出的锚点遵守 #49「ASCII 锚点」原则之外，还要**引号中立**：匹配标识符/注释/结构（如 `maskSessionProps`、`getCanvasImageEditToolbarTools`），或正则里用 `['"]` 兼容两种引号；不要直接把源码里的单引号片段当锚点。
 - **教训**：「dev server 没吐新代码」下结论前，先把响应里目标附近的实际文本打出来看一眼（引号、换行、标识符 rename 都可能与源码不同）；另：PowerShell 里 `node -e` 嵌套引号必坏，复杂探针写临时 `.mjs` 文件再 `node file.mjs`。
 - **验证**：改用 `maskSessionProps` 标识符锚点后立刻确认新代码已上线（ternary 确实以双引号形式存在）。
+
+### 79. 「hover 无效果」先分辨「hover 未触发」还是「触发但色号不可感知」：setTimeout 延迟探针 + matches(':hover') + getComputedStyle 一锤定音
+
+- **标签**：`hover` `css` `portal` `探针` `控制台` `matches` `aigc_design_canvas`
+- **现象**：画布标记卡词条下拉（body portal、position:fixed），用户报告「鼠标悬到第二项，高亮不跟随、停留在第一项」。第一项保持选中色 `#1e3a5f` 偏亮，第二项看似无任何反应。
+- **排查手法**：控制台运行延迟探针（回车后 N 秒内把鼠标悬到目标项上保持不动，避免点击控制台导致鼠标离开）：
+  `setTimeout(() => { const opts=[...document.querySelectorAll('[class*=markerTermOption]')]; console.log(JSON.stringify(opts.map(o=>({text:o.textContent.slice(0,6),hover:o.matches(':hover'),bg:getComputedStyle(o).backgroundColor})))) }, 3000)`
+  `matches(':hover')` 给出 hit-test 结论，`getComputedStyle` 给出实际生效色——两个维度一次拿全。
+- **结论**：第二项 `hover:true` 且 bg=`rgb(21,29,49)`（即设计 hover 色 `#151d31`）——hover 完全正常，只是该色号与下拉底色 `#0f172a` 每通道差仅 6-7，肉眼不可辨；选中色 `#1e3a5f` 明显更亮，视觉上就像「高亮停在第一项」。
+- **修复**：提亮 hover 色号（`#151d31`→`#1a2742`，仍弱于选中色），只改 `.markerTermOption:hover` 一处。
+- **教训**：① 「样式没生效」下结论前必须区分 **hit-test 失败**（透明层遮挡/事件被吞 → `hover:false`）与 **样式生效但不可感知**（色差太小 → `hover:true` + bg 恰为设计色），两者修复路径完全不同；② 共享 SCSS 里「存在但 Δ<10/通道」的 hover 色等于没有；改色号前先 grep 全仓库该色号，确认其它引用都是静态底色再动（本次其余 3 处 `#151d31` 均为静态底色，未动）；③ 探针需要鼠标留在目标上，点击控制台会移走鼠标——必须用 setTimeout 延迟执行。
+- **验证**：画布回归 127/127；git diff 确认仅 2 行实质变更（整文件 CRLF 误报为 #58 幻影，git 已归一化）。
