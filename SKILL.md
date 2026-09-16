@@ -1056,3 +1056,12 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **修复**：提亮 hover 色号（`#151d31`→`#1a2742`，仍弱于选中色），只改 `.markerTermOption:hover` 一处。
 - **教训**：① 「样式没生效」下结论前必须区分 **hit-test 失败**（透明层遮挡/事件被吞 → `hover:false`）与 **样式生效但不可感知**（色差太小 → `hover:true` + bg 恰为设计色），两者修复路径完全不同；② 共享 SCSS 里「存在但 Δ<10/通道」的 hover 色等于没有；改色号前先 grep 全仓库该色号，确认其它引用都是静态底色再动（本次其余 3 处 `#151d31` 均为静态底色，未动）；③ 探针需要鼠标留在目标上，点击控制台会移走鼠标——必须用 setTimeout 延迟执行。
 - **验证**：画布回归 127/127；git diff 确认仅 2 行实质变更（整文件 CRLF 误报为 #58 幻影，git 已归一化）。
+
+### 80. aigc_design_canvas commitlint：footer/body 每行上限 100 字符，超长整笔提交被拒（lint-staged 全过也没用）
+
+- **标签**：`commitlint` `husky` `commit-msg` `footer-max-line-length` `aigc_design_canvas` `git`
+- **现象**：`git commit` 时 lint-staged（prettier/eslint/stylelint）全部通过，但 commit-msg 钩子报 `footer's lines must not be longer than 100 characters [footer-max-line-length]`，整笔提交失败，文件仍留在暂存区。
+- **根因**：仓库 commitlint 配置每个 `-m` 段落展开后每行 ≤100 字符（中文每字算 1 字符）；此前笔记写成「body 每行 ≤200」是错的，实测上限 100。
+- **修复**：把长 bullet 拆成多条 `-m`，每条控制在 60 字左右，重跑 `git commit` 即可（暂存区不丢，无需重新 add）。
+- **教训**：① 写提交信息按「每行 ≤100 字符」预算，中文长句宁多拆一条 `-m`；② commit 失败先分辨是 lint-staged 阶段还是 commit-msg 阶段——前者是代码格式问题，后者是信息格式问题，修法完全不同；③ commit-msg 失败不会动暂存区，直接重写信息重试。
+- **验证**：拆行后同批文件提交成功（aigc_design_canvas `8480600`）。
