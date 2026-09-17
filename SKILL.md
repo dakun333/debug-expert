@@ -1065,3 +1065,15 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **修复**：把长 bullet 拆成多条 `-m`，每条控制在 60 字左右，重跑 `git commit` 即可（暂存区不丢，无需重新 add）。
 - **教训**：① 写提交信息按「每行 ≤100 字符」预算，中文长句宁多拆一条 `-m`；② commit 失败先分辨是 lint-staged 阶段还是 commit-msg 阶段——前者是代码格式问题，后者是信息格式问题，修法完全不同；③ commit-msg 失败不会动暂存区，直接重写信息重试。
 - **验证**：拆行后同批文件提交成功（aigc_design_canvas `8480600`）。
+
+### 81. edit 工具写入后整文件变 CRLF → eslint 全量 `␍` 幻影误报（core.autocrlf=true 掩盖，git diff 看不出来）
+
+- **标签**：`edit工具` `CRLF` `prettier` `␍` `autocrlf` `幻影报错` `Windows`
+- **现象**：用 edit 工具改完某文件后，`eslint <file>` 报**从第 1 行起全文件** `Delete ␍`（与 #58 存量 CRLF 文件症状相同），但该文件此前 lint 是干净的、不在 #58 清单里。
+- **根因**：edit 工具在本机写回文件时把行尾统一成 CRLF；仓库 `core.autocrlf=true`，`git diff`/`git add` 时 git 自动归一化为 LF，**diff 行数完全正常**，肉眼和 git 都察觉不到；但 prettier 按工作区字节校验，CRLF 即全量幻影报错。
+- **判定**（区分「我引入的」vs「#58 存量」）：
+  1. `git show HEAD:<file> | 前 N 行` 无 `` `r ``（blob 为 LF）+ 工作区文件含 CRLF + 该文件刚被自己 edit 过 → **自己引入，必须转回 LF**；
+  2. blob 本身就是 CRLF → 存量（#58），勿动、勿 `--fix`。
+- **修复**：`$t=[IO.File]::ReadAllText($p); $t=$t -replace "`r`n","`n"; [IO.File]::WriteAllText($p,$t,(New-Object System.Text.UTF8Encoding $false))`（无 BOM），再跑 eslint 验证；`warning: LF will be replaced by CRLF` 是 autocrlf 正常提示，blob 仍是 LF，忽略。
+- **教训**：本机每次 edit 工具改文件后，若接下来要跑 eslint，先检查行尾；全文件 `␍` 报错且文件不在 #58 清单 → 99% 是本次 edit 引入，转 LF 即可，**绝不** `--fix`（会把整个文件行尾翻动写进暂存，污染 diff）。
+- **验证**：2026-09-17 aigc_design_canvas 粘贴透明图修复，edit 后 page.tsx/canvas-source-contract.test.ts 双双全量幻影，转 LF 后 eslint 0、回归 200/200。
