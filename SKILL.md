@@ -1077,3 +1077,19 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **修复**：`$t=[IO.File]::ReadAllText($p); $t=$t -replace "`r`n","`n"; [IO.File]::WriteAllText($p,$t,(New-Object System.Text.UTF8Encoding $false))`（无 BOM），再跑 eslint 验证；`warning: LF will be replaced by CRLF` 是 autocrlf 正常提示，blob 仍是 LF，忽略。
 - **教训**：本机每次 edit 工具改文件后，若接下来要跑 eslint，先检查行尾；全文件 `␍` 报错且文件不在 #58 清单 → 99% 是本次 edit 引入，转 LF 即可，**绝不** `--fix`（会把整个文件行尾翻动写进暂存，污染 diff）。
 - **验证**：2026-09-17 aigc_design_canvas 粘贴透明图修复，edit 后 page.tsx/canvas-source-contract.test.ts 双双全量幻影，转 LF 后 eslint 0、回归 200/200。
+
+### 82. PowerShell 5.1 `Set-Content -Encoding UTF8` 带 BOM → 读取方 `json.loads(utf-8)` 静默失败
+
+- **标签**：`powershell` `utf8` `BOM` `json` `config` `windows`
+- **现象**：用 PS 5.1 `Set-Content -Encoding UTF8` 写 JSON 配置文件（如 `%LOCALAPPDATA%\Web2PS\config.json`），读取方 Python `json.loads(path.read_text(encoding="utf-8"))` 报 `Unexpected UTF-8 BOM (decode using utf-8-sig)`；若读取方 try/except 吞异常，配置会被**静默忽略**，表现为「配置写了但不生效」，无任何用户可见报错。
+- **根因**：Windows PowerShell 5.1 的 `-Encoding UTF8` 恒写 BOM（PS 7+ 才有 utf8NoBOM）；Python 严格 utf-8 解码拒绝 BOM。
+- **修复**：读取方一律用 `utf-8-sig`（有无 BOM 通吃）；或写入方用 `[IO.File]::WriteAllText($p, $text, (New-Object System.Text.UTF8Encoding $false))` 写无 BOM。
+- **验证**：web2ps launcher 的 config 读取改 `utf-8-sig` 后，带 BOM 的 config.json 解析正常（launcher.log 无 Config read failed）。
+
+### 83. 本机无 `py` 启动器：依赖 `py -3` 的 .bat 启动脚本直接失败
+
+- **标签**：`python` `py-launcher` `windows` `bat` `venv`
+- **现象**：项目 run.bat/test.bat 里 `py -3 -m venv .venv` 报「无法将 py 项识别为 cmdlet」，脚本中断。
+- **根因**：本机 Python 3.11.15 非 python.org 安装器装入（无 py.exe 启动器），PATH 里只有 python/pythonw。
+- **修复**：手动 `python -m venv .venv` + `.venv\Scripts\python.exe -m pip install -r requirements.txt` 替代；或脚本改用 `python`。跑 pytest 直接 `.venv\Scripts\python.exe -m pytest`。
+- **验证**：web2ps-auto-demo 用该方式建环境、起 uvicorn、pytest 2 passed。
