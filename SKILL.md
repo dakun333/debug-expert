@@ -1093,3 +1093,11 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **根因**：本机 Python 3.11.15 非 python.org 安装器装入（无 py.exe 启动器），PATH 里只有 python/pythonw。
 - **修复**：手动 `python -m venv .venv` + `.venv\Scripts\python.exe -m pip install -r requirements.txt` 替代；或脚本改用 `python`。跑 pytest 直接 `.venv\Scripts\python.exe -m pytest`。
 - **验证**：web2ps-auto-demo 用该方式建环境、起 uvicorn、pytest 2 passed。
+
+### 84. pip 直连 PyPI `getaddrinfo failed`（DNS 解析失败）→ 换清华镜像源立即恢复
+
+- **标签**：`pip` `dns` `network` `mirror` `pypi`
+- **现象**：`pip install -r requirements.txt` 报 `NewConnectionError ... Failed to establish a new connection: [Errno 11001] getaddrinfo failed`（pypi.org 解析失败），重试无效；同机其它时段 pip 又正常——间歇性 DNS 故障（与 #38 同一台机器的 DNS 不可靠问题）。
+- **修复**：直接换国内镜像源，不要反复重试直连：`python -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple`（清华源）。长期方案：`pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple`。
+- **验证**：换源后 exit=0，依赖装全，uvicorn 正常起服。
+- **关联**：#38（系统 DNS 1.1.1.1/4.2.2.1 不可靠）；凡 DNS 类失败（git/curl/npm/pip）先怀疑本机 DNS，再考虑镜像/hosts 两条路。
