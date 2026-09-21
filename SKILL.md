@@ -1119,3 +1119,25 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **修复/口径**：dev server 探针锚点遵守 #78（引号中立）之外，还要**参数名中立**——锚点只用属性名/结构片段（如 `ctrlKey`、`metaKey`、`shiftKey ||`），或先 `IndexOf('ctrlKey')` 打印上下文人工确认；不要把源码里 `event.xxx` 字面量当锚点。
 - **验证**：改用 `Contains('ctrlKey')` + 上下文打印后确认两个 ShapeUtil 的 Ctrl 加选逻辑均已上线。
 - **关联**：#78（引号改写）；同属「esbuild transform 产物 ≠ 源码字面量」家族，探针前先看实际产物文本。
+
+### 87. tldraw 无头 Editor 集成测试三件套：`initialState: 'select'` 必传、pointer_move 攒批、探针要 Box 实例
+
+- **标签**：`tldraw` `headless` `Editor` `initialState` `dispatch` `vitest` `aigc_design_canvas` `canvas`
+- **项目**：`D:\project\2026\gitlab\aigc_design_canvas`（tldraw 5.3.1，无头 editor 模拟框选/点击交互）
+- **现象**：vitest 无头 `new Editor({store, shapeUtils, bindingUtils, tools: defaultTools, getContainer})` + `editor.dispatch({type:'pointer', target:'canvas', name:'pointer_down'/'pointer_move'/'pointer_up', ...})` 模拟框选，结果 selectedShapeIds 恒为 `[]`，spatial index 查询也空。
+- **根因（三层叠加）**：
+  1. **`initialState` 缺省**：无头 Editor 构造后 `getCurrentToolId()` 是**空字符串**——pointer 事件根本没进 select 状态机（idle → pointing_canvas → brushing 链不工作）。必须显式 `initialState: 'select'`。
+  2. **pointer_move 攒批**：`Editor.dispatch` 对 `pointer_move`/`wheel`/`pinch` 只入队不立即 flush（`_pendingEventsForNextTick`），由下一个非 move 事件（如 pointer_up）或 rAF tick 触发 `_flushEventsForTick` 才处理。测试里 dispatch(move) 后立即断言永远拿到旧状态；dispatch(up) 时会按序 flush [move, move, up]，最终状态正确。
+  3. **`getShapeIdsInsideBounds` 需要 Box 实例**：内部 `rbush.search(bounds)` 读 `bounds.minX/maxX`，传字面量 `{x,y,w,h}` 静默返回空集；探针必须 `new Box(x,y,w,h)`。另外空间索引走响应式 computed，createShapes 后首次查询即触发 rebuild，无需手动刷新。
+- **修复**：`new Editor({..., initialState: 'select'})`；模拟拖拽按 [down, move, move, up] 序列 dispatch，以 up 后的状态为准；探针用 Box 实例。
+- **验证**：2026-09-21 画布框选过滤端到端用例（`canvas-arrow-selection-filter.test.ts`）4/4 通过：brushing 后 `selected=[card-a]`、连线被 sideEffect 剔除。
+- **教训**：无头模拟 tldraw 交互前，先 `console.log(editor.getCurrentToolId())` 确认状态机就位；事件序列以「up 后状态」为准，不打中间态。
+
+### 88. vite 多轮 HMR 后画布交互"半生效"：shape util class 不被 Fast Refresh 替换 + editor 构造参数不重建，必须 --force 重启 + 硬刷新再验证
+
+- **标签**：`vite` `hmr` `fast-refresh` `shape-util` `混合态` `arti-aigc` `canvas` `重启`
+- **现象**：画布交互改动（shape util 的 pointer 逻辑、page.tsx 的 editor onMount 注册、overlayUtils/components props）后，用户反馈"功能没生效/行为更怪"——实际是**新旧代码混合态**：① ShapeUtil 文件含 class 导出，Fast Refresh 只推 hmr update 替换模块导出，**已创建的 editor 实例仍持旧 class**（#75 同类）；② page.tsx 即使 HMR 重渲染，`onMount` 回调不会重跑、`overlayUtils` 等 editor 构造参数不会重建 editor——除非整个路由页面 remount。混合态下行为不可预测，无法据此判断代码对错。
+- **根因**：tldraw editor 是「构造时固化」的重对象（shapeUtils/bindingUtils/overlayUtils/onMount 副作用全部一次性注册），React 层任何 HMR 增量都不会渗入已存 editor。
+- **修复/口径**：改动画布 editor 相关代码后，**验证前必做**：① vite dev server `--force` 重启（清 transform 缓存）；② 浏览器 Ctrl+Shift+R 硬刷新（重建 editor 实例）；③ 探针确认模块内容（#78/#86 锚点口径）；④ 交互回归优先用无头 editor 测试闭环（#87），浏览器端只做最终人工验收。
+- **验证**：2026-09-21 框选/Ctrl 加选改动，无头 editor 端到端 4/4 + 回归 307/307 全绿，--force 重启 + 探针全 True 后交付用户硬刷新验证。
+- **关联**：#75（shape util HMR 假象）、#54（多轮 HMR 后白屏/行为陈旧）、#39（vite 模块缓存损坏）。
