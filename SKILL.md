@@ -1101,3 +1101,21 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **修复**：直接换国内镜像源，不要反复重试直连：`python -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple`（清华源）。长期方案：`pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple`。
 - **验证**：换源后 exit=0，依赖装全，uvicorn 正常起服。
 - **关联**：#38（系统 DNS 1.1.1.1/4.2.2.1 不可靠）；凡 DNS 类失败（git/curl/npm/pip）先怀疑本机 DNS，再考虑镜像/hosts 两条路。
+
+### 85. tldraw 5.x 选中状态在 `instance_page_state` record，不在 `instance`（sideEffect 注册错 scope 编译报错）
+
+- **标签**：`tldraw` `sideEffects` `instance_page_state` `selectedShapeIds` `arti-aigc` `canvas`
+- **项目**：`D:\project\2026\gitlab\aigc_design_canvas`（tldraw 5.3.1）
+- **现象**：`editor.sideEffects.registerAfterChangeHandler('instance', (_prev, next) => next.selectedShapeIds)` 编译报 `Property 'selectedShapeIds' does not exist on type 'TLInstance'`，回调参数退化为 `never`。
+- **根因**：tldraw v2+ 起 `selectedShapeIds`/`editingShapeId`/`focusedGroupId`/`brush` 都挂在**每页一条**的 `TLInstancePageState` record 上（scope 名 `'instance_page_state'`）；`TLInstance` 只剩相机/画笔等全局字段。多页场景下选中状态天然按页隔离。
+- **修复**：监听选中变化用 `registerAfterChangeHandler('instance_page_state', (prev, next) => ...)`；回调里先 `next.id !== editor.getCurrentPageState().id` 跳过非当前页，再读 `next.selectedShapeIds`。
+- **配套用法（连线不参与选中）**：afterChange 里发现 selectedShapeIds 含 arrow 时 `editor.run(() => editor.setSelectedShapes(filtered), { history: 'ignore' })` 二次修正（幂等终止，不死循环）；删除连线由业务侧按 binding 级联，不依赖连线在选区内。
+- **验证**：2026-09-21 画布框选修复，tsc 通过；回归 290/290。
+
+### 86. vite/esbuild 探针锚点假阴性（变体）：事件参数被重命名 `event` → `event_0` / `event_1`
+
+- **标签**：`vite` `esbuild` `transform` `探针` `锚点` `参数重命名` `假阴性` `aigc_design_canvas`
+- **现象**：源码刚加的 `event.ctrlKey || event.metaKey` 逻辑，用 `Invoke-WebRequest .../XxxShapeUtil.tsx` + `Contains('ctrlKey || event.metaKey')` 验证 dev server 是否吐新代码，返回 False；实际模块已是新代码——esbuild 把函数参数 `event` 重命名为 `event_0`（模块内多处 `event` 参数遮蔽时依次编号 `event_0/event_1`），产物里是 `event_0.ctrlKey || event_0.metaKey`。
+- **修复/口径**：dev server 探针锚点遵守 #78（引号中立）之外，还要**参数名中立**——锚点只用属性名/结构片段（如 `ctrlKey`、`metaKey`、`shiftKey ||`），或先 `IndexOf('ctrlKey')` 打印上下文人工确认；不要把源码里 `event.xxx` 字面量当锚点。
+- **验证**：改用 `Contains('ctrlKey')` + 上下文打印后确认两个 ShapeUtil 的 Ctrl 加选逻辑均已上线。
+- **关联**：#78（引号改写）；同属「esbuild transform 产物 ≠ 源码字面量」家族，探针前先看实际产物文本。
