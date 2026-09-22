@@ -1141,3 +1141,43 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **修复/口径**：改动画布 editor 相关代码后，**验证前必做**：① vite dev server `--force` 重启（清 transform 缓存）；② 浏览器 Ctrl+Shift+R 硬刷新（重建 editor 实例）；③ 探针确认模块内容（#78/#86 锚点口径）；④ 交互回归优先用无头 editor 测试闭环（#87），浏览器端只做最终人工验收。
 - **验证**：2026-09-21 框选/Ctrl 加选改动，无头 editor 端到端 4/4 + 回归 307/307 全绿，--force 重启 + 探针全 True 后交付用户硬刷新验证。
 - **关联**：#75（shape util HMR 假象）、#54（多轮 HMR 后白屏/行为陈旧）、#39（vite 模块缓存损坏）。
+
+### 89. jsdom 测试「原生事件监听里的 setState」必须包 act()，否则 React 19 批处理不同步刷新 → getByRole 找不到
+
+- **标签**：`jsdom` `vitest` `act` `setState` `原生事件` `React19` `testing-library` `aigc_design_canvas`
+- **现象**：组件用 `window.addEventListener('pointermove', ...)` + `useState` 记录悬停；测试里 `window.dispatchEvent(new MouseEvent('pointermove'))` 后 `screen.getByRole('button')` 报 Unable to find，渲染输出仍是空 div。同一文件里「断言不渲染」的反向用例全部通过（状态本来就没变），只有正向用例挂，极具迷惑性。
+- **根因**：React 18/19 对 React 事件系统之外的更新（原生 listener 里的 setState）走并发批处理，不保证同步 flush；`window.dispatchEvent` 不是 testing-library 的 fireEvent，不进 act()，断言跑在 flush 之前。对比：CanvasPlusButton 测试同款 dispatch 能通过，因为该组件直接 `button.style.transform = ...` 操作 DOM，不经过 React 状态。
+- **修复**：dispatch 包 act()：
+  ```ts
+  import { act } from '@testing-library/react';
+  act(() => { window.dispatchEvent(event); });
+  ```
+- **判定口诀**：被测组件是「事件 → setState → 渲染」链路 → dispatch 必须 act；「事件 → 直接改 DOM」链路 → 不用。
+- **验证**：2026-09-22 CanvasConnectionScissors 测试，3 个正向用例加 act 后 7/7 通过。
+
+### 90. tldraw getArrowInfo 返回箭头「局部坐标」，且内部 arc 几何与自定义渲染路径不重合——悬停命中必须按渲染路径自命中
+
+- **标签**：`tldraw` `getArrowInfo` `坐标系` `getShapePageTransform` `arc` `bend` `悬停命中` `aigc_design_canvas`
+- **项目**：`D:\project\2026\gitlab\aigc_design_canvas`（tldraw 5.3.1，连线悬停剪刀）
+- **现象**：悬停连线显示删除按钮，按 `getArrowInfo(editor, arrow).start/end.point` 取中点直接 `editor.pageToViewport()`，用户实测悬停后按钮根本不可见。
+- **根因（两层叠加）**：
+  1. **坐标系错**：`getArrowInfo` 返回的 start/end 点是**箭头局部坐标**（getCurvedArrowInfo 返回的 a/b 在 arrow space），直接喂给 `pageToViewport` 会把按钮定位到「箭头局部原点」附近——离悬停点几百上千 px，常在视口外。必须 `editor.getShapePageTransform(arrow.id).applyToPoint(localPoint)` 先还原到页面坐标。
+  2. **命中区错**：tldraw 悬停（updateHoveredShapeId → getShapeAtPoint）用的是内部 arc 几何，bend 固定 ±48px；本画布渲染用自定义 cubic/直线（getCanvasConnectionPath）。水平直线场景渲染线在 y=150，arc 上凸到 y≈102——悬停渲染线中点距 tldraw 命中区 48px，**hoveredShapeId 永远拿不到**。
+- **修复**：放弃 tldraw hoveredShapeId，window pointermove + `editor.screenToPage()` 转页面坐标，按渲染路径几何（与 getCanvasConnectionPath 同参数的直线/cubic 采样折线距离 `getCanvasConnectionDistance`）自命中；阈值用 `屏幕px / zoom` 保证缩放手感一致。
+- **教训**：① tldraw 的 arrow「信息/几何」和「自定义渲染」是两套东西，凡自定义 component 渲染的 shape，交互命中都必须对齐**自己画的那套几何**；② 单元测试 mock 了 getArrowInfo 导致坐标系 bug 漏网——坐标换算类逻辑，测试里 mock 的 transform 要带**非零偏移**（如 +300/+150），少了变换立刻断言失败。
+- **验证**：2026-09-22 无头 editor 诊断确认 hover 链路本身可达（arc 顶点处 hoveredShapeId=arrow），但命中区与渲染线不重合；改自命中后 7/7 + 回归全绿，用户实测通过。
+
+### 91. TS 闭包收窄陷阱：forEach 回调里给外层 `let x: T | null` 赋值后，循环外读取被 narrow 成 never（TS2339）
+
+- **标签**：`typescript` `闭包` `narrowing` `forEach` `never` `TS2339`
+- **现象**：
+  ```ts
+  let nearest: { id: X; distance: number } | null = null;
+  arr.forEach(item => { if (...) nearest = {...}; });
+  setState(nearest ? nearest.id : null); // TS2339: Property 'id' does not exist on type 'never'
+  ```
+  vitest（esbuild 不查类型）全绿，`tsc --noEmit` 才报。
+- **根因**：TS 控制流分析不跟踪「闭包内的赋值」对声明点的反作用——它认为循环后 `nearest` 仍是初始值 `null`，`nearest ? ...` 的 true 分支收窄为 never。
+- **修复**：forEach 改 `for...of`（赋值在同作用域，narrowing 正常），读取用 `nearest?.id ?? null`。
+- **教训**：「聚合变量 + 回调赋值」组合一律用 for...of；改动后 tsc 必须跑一次（vitest 绿 ≠ 类型对）。
+- **验证**：2026-09-22 CanvasConnectionScissors 命中聚合逻辑改 for...of 后 tsc 0 error。
