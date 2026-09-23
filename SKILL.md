@@ -1181,3 +1181,23 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **修复**：forEach 改 `for...of`（赋值在同作用域，narrowing 正常），读取用 `nearest?.id ?? null`。
 - **教训**：「聚合变量 + 回调赋值」组合一律用 for...of；改动后 tsc 必须跑一次（vitest 绿 ≠ 类型对）。
 - **验证**：2026-09-22 CanvasConnectionScissors 命中聚合逻辑改 for...of 后 tsc 0 error。
+
+### 92. tldraw 画布根节点「原生 wheel 监听」先于 React onWheel 处理——表单内滚轮拦截必须用原生监听 stopPropagation
+
+- **标签**：`tldraw` `wheel` `滚轮` `stopPropagation` `原生事件` `React onWheel` `aigc_design_canvas` `canvas`
+- **项目**：`D:\project\2026\gitlab\aigc_design_canvas`（tldraw 5.3.1，画布卡片表单）
+- **现象**：生成器卡提示词编辑区（textarea，内容超长可滚动）已获得焦点进入编辑态，用户滑滚轮想滚动文本，结果画布在平移/缩放——宿主 div 上明明写了 React `onWheel={e => e.stopPropagation()}`，完全不生效。
+- **根因**：tldraw 在画布根节点用**原生** `wheel` 监听驱动相机；事件冒泡路径是 textarea → … → tldraw 容器（原生监听在此触发，画布已缩放）→ … → React 根（此时才派发合成 onWheel，stopPropagation 为时已晚）。React 合成事件的拦截点在 tldraw 原生监听**之后**，所以对画布滚轮永远慢一步。
+- **修复**：在实际滚动容器上以**原生监听**阻断冒泡（只 stopPropagation、不 preventDefault，保留默认滚动）：
+  ```ts
+  useEffect(() => {
+    const el = hostRef.current;
+    if (!el) return;
+    const stopCanvasWheel = (event: WheelEvent) => { event.stopPropagation(); };
+    el.addEventListener('wheel', stopCanvasWheel, { passive: false });
+    return () => { el.removeEventListener('wheel', stopCanvasWheel); };
+  }, []);
+  ```
+  同仓库先例：CanvasGroupShapeUtil 文本结果区 `textResultElement.addEventListener('wheel', ...)`（源码契约已锚定同款正则）。
+- **教训**：画布内任何「可滚动区域」（文本框、面板、下拉列表）要挡画布滚轮，一律用原生 wheel 监听，不要指望 React onWheel；写完顺手在 canvas-source-contract 加正则锚点防回退。
+- **验证**：2026-09-23 CanvasGenerationWorkflowPanel 面板宿主加原生 wheel 监听，契约锚点 1 例、回归 353/353 全绿，用户实测文本框内滚轮滚动正常。
