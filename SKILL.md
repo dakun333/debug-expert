@@ -1201,3 +1201,22 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
   同仓库先例：CanvasGroupShapeUtil 文本结果区 `textResultElement.addEventListener('wheel', ...)`（源码契约已锚定同款正则）。
 - **教训**：画布内任何「可滚动区域」（文本框、面板、下拉列表）要挡画布滚轮，一律用原生 wheel 监听，不要指望 React onWheel；写完顺手在 canvas-source-contract 加正则锚点防回退。
 - **验证**：2026-09-23 CanvasGenerationWorkflowPanel 面板宿主加原生 wheel 监听，契约锚点 1 例、回归 353/353 全绿，用户实测文本框内滚轮滚动正常。
+
+### 93. React 19 根节点 wheel/touch 监听「捕获+冒泡双向都是 passive」——onWheel/onWheelCapture 的 preventDefault 静默失效，stopPropagation 却能截断原生捕获守卫
+
+- **标签**：`React19` `wheel` `passive` `preventDefault` `onWheelCapture` `stopPropagation` `浏览器缩放` `aigc_design_canvas`
+- **项目**：`D:\project\2026\gitlab\aigc_design_canvas`（React 19.1.2，画布 ctrl+滚轮）
+- **现象**：已有「stage 捕获阶段拦截 ctrl+wheel 交给 tldraw 缩放」的原生守卫（capture+passive:false），但用户在生成器卡表单区域 ctrl+滚轮仍触发**浏览器整页缩放**——守卫根本没收到事件。
+- **根因**：React 19 在根容器注册 wheel/touchstart/touchmove 监听时，**捕获和冒泡两相都是 `passive: true`**（react-dom-client 源码：`"wheel" !== domEventName || (listenerWrapper = !0)` → `{ capture: !0, passive: listenerWrapper }`）。后果：① 组件里 `onWheel`/`onWheelCapture` 的 `event.preventDefault()` **被浏览器静默忽略**（console 有 Unable to preventDefault 警告）；② 但 `event.stopPropagation()` **仍然生效**——合成捕获在 React 根容器触发，先于下方一切原生捕获监听。生成器卡媒体行的 `onWheelCapture`（preventDefault 失效 + stopPropagation 生效）把 ctrl+wheel 截停在根容器，stage 守卫永远收不到 → 无人 preventDefault → 浏览器缩放。
+- **修复**：把这类「不可被组件绕过的全局守卫」挂到 **window 捕获** + 显式 `passive: false` + 目标包含性判断（Chrome 对 window/document 的 passive 默认只是默认值，显式 passive:false 可覆盖）：
+  ```ts
+  const handle = (event: WheelEvent) => {
+    const stage = stageRef.current;
+    if (!stage || !(event.target instanceof Node) || !stage.contains(event.target)) return;
+    routeCanvasModifierWheel(event, info => editorRef.current?.dispatch(info));
+  };
+  window.addEventListener('wheel', handle, { capture: true, passive: false });
+  ```
+- **教训**：① React 19 下**任何** onWheel/onWheelCapture 的 preventDefault 都是空话，要拦默认行为必须用原生非 passive 监听（同族坑 #92）；② 原生捕获守卫挂在 React 根容器**内部**的节点上，可能被上层 React 合成捕获的 stopPropagation 截停——全局守卫一律挂 window 捕获 + contains 判断；③ 探针锚点注意 esbuild 会把 `event`/`stage` 这类高频参数名重命名成 `event_38`/`stage_0`（#86），别拿源码字面量当锚点。
+- **验证**：2026-09-23 守卫从 stage 捕获改挂 window 捕获后，契约锚点更新、回归 353/353 + canvas-wheel-zoom 3/3 全绿，探针确认新代码上线。
+- **关联**：#92（tldraw 原生 wheel 先于 React onWheel）；#86（esbuild 参数重命名探针假阴性）。
