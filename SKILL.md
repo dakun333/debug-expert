@@ -1220,3 +1220,13 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **教训**：① React 19 下**任何** onWheel/onWheelCapture 的 preventDefault 都是空话，要拦默认行为必须用原生非 passive 监听（同族坑 #92）；② 原生捕获守卫挂在 React 根容器**内部**的节点上，可能被上层 React 合成捕获的 stopPropagation 截停——全局守卫一律挂 window 捕获 + contains 判断；③ 探针锚点注意 esbuild 会把 `event`/`stage` 这类高频参数名重命名成 `event_38`/`stage_0`（#86），别拿源码字面量当锚点。
 - **验证**：2026-09-23 守卫从 stage 捕获改挂 window 捕获后，契约锚点更新、回归 353/353 + canvas-wheel-zoom 3/3 全绿，探针确认新代码上线。
 - **关联**：#92（tldraw 原生 wheel 先于 React onWheel）；#86（esbuild 参数重命名探针假阴性）。
+
+### 94. jsdom 共享环境测试污染：canvas-feature-layout 里渲染生成器卡工作流面板会让后续图像编辑卡用例抛 `SyntaxError: unknown pseudo-class selector '':A *''`——集成类用例放独立文件
+
+- **标签**：`vitest` `jsdom` `测试污染` `nwsapi` `canvas-feature-layout` `测试隔离` `aigc_design_canvas`
+- **项目**：`D:\project\2026\gitlab\aigc_design_canvas`
+- **现象**：在 `canvas-feature-layout.test.tsx` 新增一个渲染 `CanvasGroupContent`（生成器卡 + 工作流面板，预置 React Query 缓存）的用例后，同文件后续的 9 个「图像编辑卡属性条」用例全部抛 `SyntaxError: unknown pseudo-class selector ':A *'`（nwsapi 解析失败）；单跑任何一边都全绿。
+- **根因（未完全定位，已确认边界）**：① 二分确认污染来自**渲染的组件树**（把 render 替换为空断言后 33/33 全绿；仅保留 queryClient 缓存 + mockEditor 预置不触发）；② 失败用例的 shape id 是 `shape:A`，报错 selector `:A *` 疑似某处把 `#shape:A *` 这类未转义 id 拼进选择器；③ 真实应用中生成器卡面板与图像编辑卡长期共存无此问题，判定为 **jsdom 单文件共享 document + 共享 mockEditor 的测试设施工件**，非应用 bug。
+- **修复**：集成类渲染用例放**独立测试文件**（独立 jsdom 环境天然隔离），既有文件恢复原样。落地：新建 `canvas-model-params-paste.test.tsx`（自带 tldraw mock 脚手架 + PointerEvent polyfill + makeGroupShape/setupEditor），feature-layout 全绿、全套件 356/356。
+- **教训**：① 在重度共享 mock（`vi.hoisted` mockEditor + 模块级 `vi.mock('tldraw')`）的 jsdom 测试文件里新增「渲染真实业务面板」的用例前，先评估跨用例污染风险；拿不准就直接放独立文件，别等批量爆红再排查；② 排污染用二分：先拿掉 render 留环境预置→区分模块态 vs DOM 树污染，再决定隔离粒度；③ 报错归属判定时，「新测试导致既有用例失败」算改动方责任，隔离新测试=修代码，不算动既有测试。
+- **验证**：2026-09-24 二分定位 + 独立文件隔离后全套件 356/356 全绿。
