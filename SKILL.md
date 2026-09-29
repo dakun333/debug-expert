@@ -1230,3 +1230,11 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **修复**：集成类渲染用例放**独立测试文件**（独立 jsdom 环境天然隔离），既有文件恢复原样。落地：新建 `canvas-model-params-paste.test.tsx`（自带 tldraw mock 脚手架 + PointerEvent polyfill + makeGroupShape/setupEditor），feature-layout 全绿、全套件 356/356。
 - **教训**：① 在重度共享 mock（`vi.hoisted` mockEditor + 模块级 `vi.mock('tldraw')`）的 jsdom 测试文件里新增「渲染真实业务面板」的用例前，先评估跨用例污染风险；拿不准就直接放独立文件，别等批量爆红再排查；② 排污染用二分：先拿掉 render 留环境预置→区分模块态 vs DOM 树污染，再决定隔离粒度；③ 报错归属判定时，「新测试导致既有用例失败」算改动方责任，隔离新测试=修代码，不算动既有测试。
 - **验证**：2026-09-24 二分定位 + 独立文件隔离后全套件 356/356 全绿。
+### 95. dev server 探针正则命中不了新代码：Vite 转译后 JSX 属性语法变了（`attr={x}` → `attr: x`），探针锚点必须按转译产物写
+
+- **标签**：`vite` `dev-server` `探针` `jsxDEV` `假阴性` `aigc_design_canvas`
+- **项目**：`D:\project\2026\gitlab\aigc_design_canvas`
+- **现象**：改动验证完后用 `Invoke-WebRequest` 打 dev server 模块 URL 做探针，正则 `getPopupContainer=\{?resolvePopupContainer\}?` 命中不了 → 误判「probe MISS / 未生效」，但模块其实已是新代码。
+- **根因**：Vite dev 把 JSX 转成 `jsxDEV(Component, { getPopupContainer: resolvePopupContainer, ... })` 对象属性形式，源码里的 `attr={x}` 写法在产物里不存在；#86 已要求锚点「引号中立、不带 TS 注解」，JSX 属性同样必须按对象属性写法匹配。
+- **修法**：探针正则优先锚**不受转译影响的标识符/字符串字面量**（如函数名、注释被剥离别用、data 属性值），或直接搜转译后的 key（`getPopupContainer: resolvePopupContainer`）；拿不准时先把响应里目标关键字附近 500 字符打出来看真实产物再写正则。
+- **验证**：2026-09-29 打印 `IndexOf('addPopoverColor')` 附近内容确认 `getPopupContainer: resolvePopupContainer` 已生效，假阴性排除。
