@@ -1238,3 +1238,12 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **根因**：Vite dev 把 JSX 转成 `jsxDEV(Component, { getPopupContainer: resolvePopupContainer, ... })` 对象属性形式，源码里的 `attr={x}` 写法在产物里不存在；#86 已要求锚点「引号中立、不带 TS 注解」，JSX 属性同样必须按对象属性写法匹配。
 - **修法**：探针正则优先锚**不受转译影响的标识符/字符串字面量**（如函数名、注释被剥离别用、data 属性值），或直接搜转译后的 key（`getPopupContainer: resolvePopupContainer`）；拿不准时先把响应里目标关键字附近 500 字符打出来看真实产物再写正则。
 - **验证**：2026-09-29 打印 `IndexOf('addPopoverColor')` 附近内容确认 `getPopupContainer: resolvePopupContainer` 已生效，假阴性排除。
+
+### 96. Photoshop COM 导入损坏 PNG 会弹 IDAT 错误并阻塞调用，不能只验证 HTTP 上传成功
+
+- **标签**：`photoshop` `COM` `PNG` `IDAT` `timeout` `web2ps` `PyInstaller`
+- **项目**：`D:\project\2026\web2ps-auto-demo`
+- **现象**：测试 PNG 可上传、下载，但 Photoshop `app.open()` 弹 `IDAT: incorrect data check`；COM `DoJavaScript` 长期不返回，网页停在 importing。此时其他 COM 调用可能报 `RPC_E_SERVERCALL_RETRYLATER (0x8001010A)`。原始用户图片实际正常，故不能把新测试工件失败归咎于用户文件。
+- **根因**：手写/base64 PNG 的 IDAT 压缩数据损坏，HTTP 测试只检查字节流没解码图片；Photoshop 模态错误弹窗阻塞自动化调用。
+- **修复**：① 测试图用 Pillow 实际编码生成；② Launcher 下载后 `Image.verify()` + 重新打开 `load()` 校验，失败先回传网页；③ JSX 临时设置 `app.displayDialogs = DialogModes.NO`，finally 恢复；④ COM 在独立子进程执行，90 秒超时仅按本次 PID 用 `taskkill /PID /T /F` 清理，不终止 Photoshop；⑤ PyInstaller 打包 Pillow、pywin32、pythoncom 及 Python 运行时，协议指向冻结 EXE 而非开发 pythonw。
+- **验证**：2026-10-08 冻结安装版 Launcher 使用用户原始 PNG 实测 open/place 均 done；损坏文件返回 exit 8 + 网页 failed/明确图片损坏原因；原有文档保留。
