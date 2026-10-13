@@ -1247,3 +1247,11 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **根因**：手写/base64 PNG 的 IDAT 压缩数据损坏，HTTP 测试只检查字节流没解码图片；Photoshop 模态错误弹窗阻塞自动化调用。
 - **修复**：① 测试图用 Pillow 实际编码生成；② Launcher 下载后 `Image.verify()` + 重新打开 `load()` 校验，失败先回传网页；③ JSX 临时设置 `app.displayDialogs = DialogModes.NO`，finally 恢复；④ COM 在独立子进程执行，90 秒超时仅按本次 PID 用 `taskkill /PID /T /F` 清理，不终止 Photoshop；⑤ PyInstaller 打包 Pillow、pywin32、pythoncom 及 Python 运行时，协议指向冻结 EXE 而非开发 pythonw。
 - **验证**：2026-10-08 冻结安装版 Launcher 使用用户原始 PNG 实测 open/place 均 done；损坏文件返回 exit 8 + 网页 failed/明确图片损坏原因；原有文档保留。
+
+### 101. PowerShell 调用 pnpm 包装命令时文件数组合并成单一参数
+
+- **标签**：`powershell` `pnpm` `数组` `prettier` `参数透传` `windows`
+- **现象**：`pnpm exec prettier --write $files` 报 No files matching，错误里的 pattern 是全部文件路径拼成的一个字符串。
+- **根因**：本机 pnpm 包装入口的参数透传将数组合并，未按独立文件参数交给下游 CLI。
+- **修复**：直接调用项目 CMD shim 并显式展开数组：`& "node_modules\.bin\prettier.CMD" --write @files`；ESLint 同理使用 `eslint.CMD @files`。换行修复仍按 #58 检查，避免无关格式改动。
+- **验证**：2026-10-13 合并后逐文件格式化成功，受影响文件 ESLint/Stylelint 通过，git diff 确认无新增代码格式差异。
