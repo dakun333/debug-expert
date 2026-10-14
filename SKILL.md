@@ -1263,3 +1263,11 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **根因**：卸载模块延迟导入网关依赖，裸解释器不具备 PyYAML；shutil.rmtree 未处理 Git 对象只读属性；PATH 标记遗漏 bin；第三方管理器备份不属于卸载器扫描范围。
 - **修复**：先按精确计划任务和 PID 停止网关及其子进程，从安装目录外解释器卸载；用 PowerShell `Remove-Item -LiteralPath <已确认专属目录> -Recurse -Force` 补删。清理专属 PATH、环境变量、快捷方式、协议注册、安装器缓存、uv editable 缓存以及 CC Switch 中 app_type=hermes 的记录和备份；SQLite secure_delete、checkpoint 和 VACUUM 清理删除记录。
 - **验证**：2026-10-14 主程序和用户数据目录、进程、计划任务、命令入口及 CC Switch Hermes 配置备份均复查为空；不能只依据卸载退出码判断完成。
+
+### 103. Hermes PortableGit 引导安装移动 unpacked 目录时访问被拒绝
+
+- **标签**：`hermes` `bootstrap` `PortableGit` `Move-Item` `TEMP` `windows`
+- **现象**：prerequisites 下载 Git 2.53.0+3 后连续失败，报临时 unpacked 目录访问被拒绝；系统已装 Git 仍无效，因为新版脚本强制使用固定工具版本。
+- **根因**：自解压完成后的根目录 Move-Item 在此环境失败；现有日志不能进一步区分文件占用与目录属性。安装器每次重新下载引导脚本，直接改缓存会被覆盖。
+- **修复**：复制引导脚本到独立目录 scripts/install.ps1，将 Git 根目录移动改为 Copy-Item -Recurse -Force，执行目标 git.exe --version 校验，失败删除不完整工具目录。启动包装脚本为安装器进程设置 TEMP/TMP 到 D 盘独立临时目录，并设置 HERMES_SETUP_DEV_REPO_ROOT 使用本地脚本；不修改系统全局 TEMP。
+- **验证**：2026-10-14 修复脚本真实下载、解压与复制成功，prerequisites JSON 返回 ok=true，git version 2.53.0.windows.3；ShowResolvedPaths 确认 temp 为 D:\Hermes-Install\temp。完整应用安装仍需继续执行后续阶段。
