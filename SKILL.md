@@ -1255,3 +1255,11 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **根因**：本机 pnpm 包装入口的参数透传将数组合并，未按独立文件参数交给下游 CLI。
 - **修复**：直接调用项目 CMD shim 并显式展开数组：`& "node_modules\.bin\prettier.CMD" --write @files`；ESLint 同理使用 `eslint.CMD @files`。换行修复仍按 #58 检查，避免无关格式改动。
 - **验证**：2026-10-13 合并后逐文件格式化成功，受影响文件 ESLint/Stylelint 通过，git diff 确认无新增代码格式差异。
+
+### 102. Windows Hermes 完整卸载报告成功但仍残留安装与数据
+
+- **标签**：`hermes` `uninstall` `windows` `shutil.rmtree` `只读` `yaml` `PATH`
+- **现象**：安装目录外 Python 执行 `-m hermes_cli.uninstall --mode full`，网关检测缺少 yaml，删除 `.git/objects` 报 WinError 5，最终仍打印成功并返回 0；User PATH 的 hermes/bin、安装器缓存和配置备份未清理。
+- **根因**：卸载模块延迟导入网关依赖，裸解释器不具备 PyYAML；shutil.rmtree 未处理 Git 对象只读属性；PATH 标记遗漏 bin；第三方管理器备份不属于卸载器扫描范围。
+- **修复**：先按精确计划任务和 PID 停止网关及其子进程，从安装目录外解释器卸载；用 PowerShell `Remove-Item -LiteralPath <已确认专属目录> -Recurse -Force` 补删。清理专属 PATH、环境变量、快捷方式、协议注册、安装器缓存、uv editable 缓存以及 CC Switch 中 app_type=hermes 的记录和备份；SQLite secure_delete、checkpoint 和 VACUUM 清理删除记录。
+- **验证**：2026-10-14 主程序和用户数据目录、进程、计划任务、命令入口及 CC Switch Hermes 配置备份均复查为空；不能只依据卸载退出码判断完成。
