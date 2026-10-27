@@ -1248,6 +1248,38 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **修复**：① 测试图用 Pillow 实际编码生成；② Launcher 下载后 `Image.verify()` + 重新打开 `load()` 校验，失败先回传网页；③ JSX 临时设置 `app.displayDialogs = DialogModes.NO`，finally 恢复；④ COM 在独立子进程执行，90 秒超时仅按本次 PID 用 `taskkill /PID /T /F` 清理，不终止 Photoshop；⑤ PyInstaller 打包 Pillow、pywin32、pythoncom 及 Python 运行时，协议指向冻结 EXE 而非开发 pythonw。
 - **验证**：2026-10-08 冻结安装版 Launcher 使用用户原始 PNG 实测 open/place 均 done；损坏文件返回 exit 8 + 网页 failed/明确图片损坏原因；原有文档保留。
 
+### 97. Demo 打包 Python 环境不包含 Marker 集成测试依赖
+
+- **标签**：`web2ps` `pytest` `venv` `pydantic_settings` `windows`
+- **现象**：使用 `web2ps-auto-demo/.venv` 跑 `aigc-marker/web2ps/test_marker_integration.py`，收集阶段报 `ModuleNotFoundError: No module named 'pydantic_settings'`。
+- **根因**：Demo 环境用于 Launcher 打包，不能据此前曾打包成功推断其安装了 Marker 的服务端依赖。
+- **修复**：先对拟使用的解释器执行 `python -c "import sys,pytest,pydantic_settings,fastapi; print(sys.executable)"`，选择依赖齐备的现有环境；不要往只读 Demo 环境补装依赖。本次 PATH 中 python 已具备依赖，改用 `python -m pytest`。
+- **验证**：2026-10-09 Marker 37 项与 Web2PS 20 项测试全部通过。
+
+### 98. jsdom 用例导入 Vite loadEnv 触发 esbuild 跨 realm 类型断言
+
+- **标签**：`vitest` `jsdom` `vite` `loadEnv` `TextEncoder` `esbuild`
+- **现象**：jsdom 测试直接 import Vite 报 `TextEncoder().encode() instanceof Uint8Array` invariant；改 node 环境后全局 DOM setup 又报 `CSSStyleDeclaration is not defined`。
+- **根因**：Vite 间接加载 esbuild，jsdom 与 Node 类型 realm 不同；项目公共 setup 依赖 DOM，不能仅切换单文件环境。
+- **修复**：环境文件契约测试使用 node:fs 检查唯一配置行；实际 `loadEnv` 验证独立执行 `node --input-type=module`，不改公共测试配置。
+- **验证**：2026-10-09 三环境契约测试通过，独立 Vite loadEnv 验证 development/test/production 地址一致。
+
+### 99. 修改 .env.test 后，组件测试硬编码默认服务地址导致 CI 失败
+
+- **标签**：`vitest` `vite` `env` `gitlab` `CI` `stubEnv`
+- **现象**：下载已正常触发，但 toHaveBeenCalledWith 等待超时；实际 URL 为正式域名，断言仍为 localhost。
+- **根因**：Vitest 会加载 test 模式环境配置，组件测试未隔离 VITE_WEB2PS_BASE_URL；安装记录按服务地址存储，旧地址还可能让历史记录测试失去意义。
+- **修复**：beforeEach 显式 vi.stubEnv，afterEach vi.unstubAllEnvs；下载用例参数化覆盖本地 HTTP 与正式 HTTPS 前缀，保持 URL、文件名、取消信号精确断言。
+- **验证**：2026-10-09 画布回归与协调器 463 项、全量 154 文件 1812 项全部通过。
+
+### 100. Windows 同一缓存路径并发 os.replace 报 WinError 5
+
+- **标签**：`windows` `web2ps` `cache` `threading` `os.replace` `PermissionError`
+- **现象**：20 个工作线程使用各自临时文件，同时向同一稳定缓存文件执行 Path.replace，仍出现 PermissionError: [WinError 5] 拒绝访问。
+- **根因**：独立临时文件只消除临时名冲突，不能消除 Windows 同一目标路径的并发替换冲突。
+- **修复**：不可变内容键使用固定数量的分片写锁；临时文件写完后在锁内检查目标是否已存在，仅首个写者 replace，后续复用已完成文件；finally 删除各自临时文件，不用覆盖正在被 Photoshop 读取的同键文件。不同键仍可并发写入。
+- **验证**：2026-10-10 20 路同键写入结果路径一致、原始字节一致且无临时文件残留，相关 Web2PS 32 项测试全绿。
+
 ### 101. PowerShell 调用 pnpm 包装命令时文件数组合并成单一参数
 
 - **标签**：`powershell` `pnpm` `数组` `prettier` `参数透传` `windows`
@@ -1271,3 +1303,35 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **根因**：自解压完成后的根目录 Move-Item 在此环境失败；现有日志不能进一步区分文件占用与目录属性。安装器每次重新下载引导脚本，直接改缓存会被覆盖。
 - **修复**：复制引导脚本到独立目录 scripts/install.ps1，将 Git 根目录移动改为 Copy-Item -Recurse -Force，执行目标 git.exe --version 校验，失败删除不完整工具目录。启动包装脚本为安装器进程设置 TEMP/TMP 到 D 盘独立临时目录，并设置 HERMES_SETUP_DEV_REPO_ROOT 使用本地脚本；不修改系统全局 TEMP。
 - **验证**：2026-10-14 修复脚本真实下载、解压与复制成功，prerequisites JSON 返回 ok=true，git version 2.53.0.windows.3；ShowResolvedPaths 确认 temp 为 D:\Hermes-Install\temp。完整应用安装仍需继续执行后续阶段。
+
+### 104. ctypes 在轮询函数中重复定义 Structure 导致常驻内存泄漏
+
+- **标签**：`windows` `python` `ctypes` `Structure` `POINTER` `memory` `web2ps` `PyInstaller`
+- **现象**：Windows Web2PS 3.8.6 常驻数天，业务进程工作集约 6.3 GiB、私有内存约 8.2 GiB；即使不导入图片也可复现增长，句柄数稳定。
+- **根因**：`running_photoshop_paths()` 每轮定义新 `Entry(ctypes.Structure)` 并生成 `ctypes.POINTER(Entry)`；ctypes 全局指针类型缓存强引用新类型，`gc.collect()` 无法释放。agent 每轮探测一次，休眠 0.5 秒。
+- **修复**：将 Windows 结构定义、WinDLL 与函数签名移至单次初始化的 `_process_api()`，以 `lru_cache(maxsize=1)` 复用；每轮仍获取新快照，不缓存进程结果，保持快照/进程句柄 finally 关闭。不要清空 ctypes 全局缓存或通过定期重启掩盖泄漏。
+- **验证**：提取已安装 EXE 的 PYZ 字节码确认原实现；同 Python 3.11 环境各探测 3000 次，旧版指针缓存 25→3025、私有内存约 15→56 MB，修复版缓存保持22、私有内存约12 MB；相关37项回归通过。独立图片缓存300轮仅增约0.4 MB；尚需新安装器部署后的多天采样。
+
+### 105. PowerShell 管道单结果退化为字符串导致安装器调用字符 C
+
+- **标签**：`powershell` `array` `Inno Setup` `web2ps`
+- **现象**：ISCC 候选经 Where-Object 过滤后只有一个，`& $IsccCandidates[0]` 报找不到命令 C。
+- **根因**：单个管道输出为字符串，索引 0 取首字符。
+- **修复**：用外层 `@(...)` 包住整个过滤管道，确保零/一/多候选均为数组。
+- **验证**：2026-10-19 Windows 3.8.7 安装器编译成功并同步下载目录。
+
+### 106. Windows Go UserHomeDir 不读取 HOME 导致 Unix 用例污染真实数据
+
+- **标签**：`go` `windows` `HOME` `USERPROFILE` `test` `web2ps`
+- **现象**：Unix 用例设置 HOME=t.TempDir，Windows 临时移植运行仍读取原任务文件，幂等入队次数为0或报任务标识已使用。
+- **根因**：Windows os.UserHomeDir 读取 USERPROFILE；单独设置 HOME 不隔离应用目录。
+- **修复**：Windows 临时源码副本明确映射 HOME 到测试 home 实现，或设置 USERPROFILE；不得修改正式 Unix home 语义。本轮仅读写了 Mac 格式目录下测试记录，未触及 Windows LOCALAPPDATA 缓存。
+- **验证**：临时副本隔离后七个缓存、批量、任务与资源回归通过；正式 Darwin 双架构编译通过。
+
+### 107. OpenCode bash 工具（PowerShell）中没有 rg/ripgrep
+
+- **标签**：`powershell` `rg` `ripgrep` `opencode` `windows` `aigc_design_canvas`
+- **现象**：在 OpenCode bash 工具（实为 Windows PowerShell 5.1）里执行 `rg -n ...` 报 `CommandNotFoundException: rg`。
+- **根因**：该环境没有安装 ripgrep，部分 agent 指南里"用 rg 统计匹配数"的建议在 Windows 工作机上不可直接用。
+- **修复**：搜索匹配用专用 Grep 工具；统计匹配数用 Grep 结果或 PowerShell `Select-String`；不要把 `rg` 当默认可用命令写进脚本或文档命令。
+- **验证**：2026-10-27 aigc_design_canvas 会话中 `rg` 失败后改用 Grep/Select-String 完成检索。
