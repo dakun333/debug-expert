@@ -1335,3 +1335,11 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **根因**：该环境没有安装 ripgrep，部分 agent 指南里"用 rg 统计匹配数"的建议在 Windows 工作机上不可直接用。
 - **修复**：搜索匹配用专用 Grep 工具；统计匹配数用 Grep 结果或 PowerShell `Select-String`；不要把 `rg` 当默认可用命令写进脚本或文档命令。
 - **验证**：2026-10-27 aigc_design_canvas 会话中 `rg` 失败后改用 Grep/Select-String 完成检索。
+
+### 108. Ant Design Select 文本命中隐藏选项，React Query 模式缓存未补齐
+
+- **标签**：`vitest` `testing-library` `antd` `Select` `react-query` `marker-send`
+- **现象**：findByText 找到下拉标签，click 后选择偶发不变；切换到带标记文档的任务后停留初始化，普通详情缓存已存在却仍请求接口。
+- **根因**：Select 的隐藏可访问选项与实际可点击 option 共用文字；标记文档启用后 queryKey 增加 marker-send，普通缓存不能命中。
+- **修复**：等待真实弹层 .ant-select-item-option 的精确 title 后点击；按实际流程同时预置普通/marker-send 的 tree 和 workflow-detail 缓存，断言目标workflowId及初始化完成，不只比较正文。
+- **验证**：2026-10-28 生产Panel两主任务来回切换15项回归通过，覆盖最新文字/@、空正文、旧词卡恢复和目标种子参数。
