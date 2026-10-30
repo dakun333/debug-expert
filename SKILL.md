@@ -1343,3 +1343,35 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **根因**：Select 的隐藏可访问选项与实际可点击 option 共用文字；标记文档启用后 queryKey 增加 marker-send，普通缓存不能命中。
 - **修复**：等待真实弹层 .ant-select-item-option 的精确 title 后点击；按实际流程同时预置普通/marker-send 的 tree 和 workflow-detail 缓存，断言目标workflowId及初始化完成，不只比较正文。
 - **验证**：2026-10-28 生产Panel两主任务来回切换15项回归通过，覆盖最新文字/@、空正文、旧词卡恢复和目标种子参数。
+
+### 109. Vitest复用test入口的helper导致重复注册，静态依赖图遗漏相对动态import
+
+- **标签**：`vitest` `test-import` `重复注册` `dynamic-import` `aigc_design_canvas`
+- **现象**：全量4189项中，同三项测试分别出现在四个文件；从main遍历依赖图又误报大量现行canvas owner不可达。
+- **根因**：三个测试直接导入另一.test文件的helper，执行模块时同时注册其describe/it；选择器依赖图仅扫描静态声明及src/@路径字符串，遗漏import('./relative/page')，不能直接用于生产死代码判断。
+- **修复**：helper提取非.test模块，保留原入口断言与调用方Editor/cleanup，并显式登记独立用例选择；可达性审计补相对动态import后再核现行调用、类型及兼容导出，不以不可达单独删除测试。
+- **验证**：2026-10-28全src361文件清理后4180项（4176通过/0失败/4既有TODO），减少9次重复执行，fullName重复0、test→test导入0；32项选择方法、类型与lint通过。
+
+### 110. Ant Design 两字中文按钮自动插空格导致可访问名称不匹配
+
+- **标签**：`antd` `Button` `testing-library` `aria-label` `vitest`
+- **现象**：getByRole('button', { name: '撤销' })找不到实际存在的按钮，DOM名称为“撤 销”；“重做”“发送”同样受影响。
+- **根因**：Ant Design Button默认为两个中文字符插入空格，精确可访问名称与原字符串不同。
+- **修复**：语义操作提供稳定aria-label，或测试使用匹配两字间可选空白的正则；不全局改变按钮配置或弱化行为断言。
+- **验证**：2026-10-28图像分层DOM两例通过，覆盖连续框、文字、删除、撤销重做、模拟请求与代际失效。
+
+### 111. Nginx反向代理保留前端Host导致回环与重复登录
+
+- **标签**：`nginx` `docker` `proxy_host` `400` `iframe` `登录循环`
+- **现象**：SSO成功后再次跳登录，命名空间接口返回400 Request Header Or Cookie Too Large；无Cookie请求同样失败。
+- **根因**：完整分支树同步覆盖旧环境的代理修复，Host从$proxy_host退回$host；按域名路由的上游收到前端Host，出现代理回环/转发头膨胀。用户加载失败被现有认证门再次送回SSO。
+- **修复**：恢复proxy_set_header Host $proxy_host及原回归；核对实际BACKEND_PROXY_TARGET，不扩大Cookie缓冲或清浏览器数据掩盖路由错误。同步文件树前核对部署专属修复。
+- **验证**：2026-10-29同Token及正文：现行内层域名400，仅Host换后端域名200/code0/11项，直连后端相同；本地代理/认证26项通过。实际修复部署后的iframe验收另行执行。
+
+### 112. tldraw延迟store通知在自定义拖拽清ref后误触发原生松手吸附
+
+- **标签**：`tldraw` `store.listen` `pointerup` `capture` `setTimeout` `拖拽`
+- **现象**：普通组逐帧成员同移，松手后生成器成员与来源偏移不同；无头只测自定义handler可通过，真实浏览器组合失败。
+- **根因**：store.listen通知有延迟，window捕获pointerup安排原生收尾时自定义drag ref仍存在，但定时回调执行时已被清空；旧候选及迟到通知被当作原生拖拽，触发第二次吸附与来源跟随。
+- **修复**：在pointerup捕获阶段冻结归属，发现activeNodeDragRef/activeGroupDragRef立即清本次原生pointer状态/候选并递增延迟序号，交给原自定义handler收尾；不能只在定时回调查询ref。
+- **验证**：2026-10-30新增pointer/ref/延迟通知红例先捕捉5→0二次吸附；修复后关联180项通过，硬刷新真实完整副本组和成员同量位移及Undo/Redo通过。
