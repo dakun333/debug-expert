@@ -1375,3 +1375,19 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **根因**：store.listen通知有延迟，window捕获pointerup安排原生收尾时自定义drag ref仍存在，但定时回调执行时已被清空；旧候选及迟到通知被当作原生拖拽，触发第二次吸附与来源跟随。
 - **修复**：在pointerup捕获阶段冻结归属，发现activeNodeDragRef/activeGroupDragRef立即清本次原生pointer状态/候选并递增延迟序号，交给原自定义handler收尾；不能只在定时回调查询ref。
 - **验证**：2026-10-30新增pointer/ref/延迟通知红例先捕捉5→0二次吸附；修复后关联180项通过，硬刷新真实完整副本组和成员同量位移及Undo/Redo通过。
+
+### 120. pip index 默认忽略预发布版本，误判 SDK 不存在
+
+- **标签**：`pip` `PyPI` `pre-release` `deepseek-harness-sdk`
+- **现象**：`pip index versions deepseek-harness-sdk` 返回 No matching distribution found，而 PyPI JSON 明确存在多个 rc/alpha 版本。
+- **根因**：该包只有预发布版本，pip index 默认不包含它们；切换 index-url 也不能解决版本过滤。
+- **修复**：查询加 `--pre`：`python -m pip index versions deepseek-harness-sdk --pre --index-url https://pypi.org/simple`；安装锁定已确认版本，不把 Python SDK 最新 rc 当成同版本 npm runtime。
+- **验证**：2026-11-05 查询成功返回 0.2.1rc2 等版本；npm DSH 已是 0.2.2-rc.1，两者版本独立核对。
+
+### 121. DSH 0.2.2 补丁被忽略但 initialize 成功，实际工具仍含 shell
+
+- **标签**：`dsh` `Cordis` `patch` `tools` `initialize` `0.2.2`
+- **现象**：SDK initialize 和 session 创建通过，Canvas 工具调用报 UNKNOWN_TOOL；实际模型请求仍含 pwsh/read_image/working_directory。
+- **根因**：`remove: <id>` 缺少必需 id 被警告后忽略；`id + remove: true` 不禁用 entry。插件 name 的 `!!js process.env...` 也未作为模块名求值，导致自定义工具未加载。启动/会话成功并不证明工具配置有效。
+- **修复**：按现有 entry id 配 `disabled: true`；插件 name 用真实相对模块路径（如 `./tools.mjs`），无需修改用户全局配置。用真实 DSH 对本地 Messages SSE 夹具调用工具，断言请求的完整工具白名单、HTTP dispatch 和 exec.callId，再测最终回复及下一 turn resume。
+- **验证**：2026-11-05 Canvas Agent 0.2.2-rc.1 真实运行时仅暴露注册的三个 Canvas read 工具，dispatch/最终回复/跨进程 resume 均通过，无付费模型请求。
