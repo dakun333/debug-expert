@@ -1399,3 +1399,27 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **根因**：ReadToEnd 依赖流 EOF，命名管道 HTTP 响应不能假设及时关闭；本轮 GET 无可用结果的更底层原因未确认。
 - **修复**：HTTP 探针应按 Content-Length/chunked 解析消息边界并设读取超时，不依赖 EOF。规则验证可用核心 -t 校验、PUT /configs 的 204、真实代理请求及 sidecar 的 match Domain(...) using DIRECT 日志闭环；不因探针阻塞重启客户端。
 - **验证**：2026-11-06 两个 aigc 域名持久化 prepend 规则及运行配置校验通过，热加载返回 204，经 7897 请求均 200，日志分别确认精确域名命中 DIRECT。
+
+### 123. SQLAlchemy MySQL create_all 多进程首次启动有建表竞态
+
+- **标签**：`mysql` `SQLAlchemy` `create_all` `Docker` `API` `worker` `1050` `1684`
+- **现象**：API和Worker同时初始化空库，报Table already exists(1050)或DESCRIBE时definition is being modified by concurrent DDL(1684)；重启后可能正常，但首次部署不可靠。
+- **根因**：create_all的checkfirst是检查后建表，不提供跨进程互斥；MySQL DDL隐式提交，普通事务不能覆盖整个初始化过程。
+- **修复**：同一连接上先获取按数据库命名的GET_LOCK(name,60)，确认返回1，再metadata.create_all(connection)，finally RELEASE_LOCK；连接关闭也释放锁。已有库的结构升级仍需版本迁移，不用create_all代替。
+- **验证**：2026-11-06 Canvas Agent首次现场复现1050/1684，加锁后API/Worker同时启动正常，真实MySQL探针及隔离E2E通过。
+
+### 124. DSH defineTool parameters不是标准JSON Schema，误传可使全部工具消失
+
+- **标签**：`dsh` `defineTool` `parameters` `JSON-Schema` `tools` `Cordis`
+- **现象**：传parameters={type:'object',properties:{},additionalProperties:false}后Harness仍initialize并回复，但Messages请求没有tools，工具回执E2E失败；只读探针使用parameters={}时正常。
+- **根因**：此版本defineTool接收按参数名映射的字段声明，而非顶层JSON Schema；错误结构导致工具插件注册失败，不能把initialize成功当注册成功。
+- **修复**：无参数传{}；有参数按现有{name:{type,...}}声明。探针使用与前端owner一致的定义，断言完整工具名单、实际dispatch及最终回执nonce，不能删除断言让纯文本回复通过。
+- **验证**：2026-11-06隔离E2E改无参数{}后实际Messages包含四个注册工具，三session的claim/ack/nonce最终回复全部通过。
+
+### 125. Docker apt-get update 长时间停在Packages下载
+
+- **标签**：`docker` `apt-get` `Debian` `network` `timeout` `buildx` `TMPDIR`
+- **现象**：构建停在deb.debian.org HTTP Packages下载超过十分钟，SSH工具超时但远端bootstrap/build仍在执行。
+- **根因**：该次源下载路径停滞，HEAD成功不代表完整下载顺畅；SSH客户端超时不会自动结束远端进程。
+- **修复**：先检查本次PID和构建日志，按准确命令终止本次bootstrap/build，避免重复构建；Debian源可配置HTTPS镜像站，apt设置30秒timeout及有限重试。本轮aliyun镜像32秒完成update。长构建脱离SSH输出依赖，日志落批准目录，TMPDIR明确指定以控制Compose元数据路径。
+- **验证**：2026-11-06替换现场镜像站后镜像构建成功，npm缓存层复用；主服务与实际Harness探针正常。
