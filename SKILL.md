@@ -1391,3 +1391,11 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **根因**：`remove: <id>` 缺少必需 id 被警告后忽略；`id + remove: true` 不禁用 entry。插件 name 的 `!!js process.env...` 也未作为模块名求值，导致自定义工具未加载。启动/会话成功并不证明工具配置有效。
 - **修复**：按现有 entry id 配 `disabled: true`；插件 name 用真实相对模块路径（如 `./tools.mjs`），无需修改用户全局配置。用真实 DSH 对本地 Messages SSE 夹具调用工具，断言请求的完整工具白名单、HTTP dispatch 和 exec.callId，再测最终回复及下一 turn resume。
 - **验证**：2026-11-05 Canvas Agent 0.2.2-rc.1 真实运行时仅暴露注册的三个 Canvas read 工具，dispatch/最终回复/跨进程 resume 均通过，无付费模型请求。
+
+### 122. Clash Windows 命名管道 HTTP 探针 ReadToEnd 阻塞
+
+- **标签**：`clash` `mihomo` `windows` `NamedPipe` `HTTP` `ReadToEnd`
+- **现象**：经 verge-mihomo 命名管道 PUT /configs 返回 204 后，GET /rules 探针使用 StreamReader.ReadToEnd 等待到工具超时；有界读取探针也未得到可用规则结果。
+- **根因**：ReadToEnd 依赖流 EOF，命名管道 HTTP 响应不能假设及时关闭；本轮 GET 无可用结果的更底层原因未确认。
+- **修复**：HTTP 探针应按 Content-Length/chunked 解析消息边界并设读取超时，不依赖 EOF。规则验证可用核心 -t 校验、PUT /configs 的 204、真实代理请求及 sidecar 的 match Domain(...) using DIRECT 日志闭环；不因探针阻塞重启客户端。
+- **验证**：2026-11-06 两个 aigc 域名持久化 prepend 规则及运行配置校验通过，热加载返回 204，经 7897 请求均 200，日志分别确认精确域名命中 DIRECT。
