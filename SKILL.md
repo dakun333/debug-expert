@@ -1423,3 +1423,11 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **根因**：该次源下载路径停滞，HEAD成功不代表完整下载顺畅；SSH客户端超时不会自动结束远端进程。
 - **修复**：先检查本次PID和构建日志，按准确命令终止本次bootstrap/build，避免重复构建；Debian源可配置HTTPS镜像站，apt设置30秒timeout及有限重试。本轮aliyun镜像32秒完成update。长构建脱离SSH输出依赖，日志落批准目录，TMPDIR明确指定以控制Compose元数据路径。
 - **验证**：2026-11-06替换现场镜像站后镜像构建成功，npm缓存层复用；主服务与实际Harness探针正常。
+
+### 127. pnpm exec 隐式重装遇共享 node_modules junction，无 TTY 中止
+
+- **标签**：`pnpm11` `exec` `lint-staged` `windows` `junction` `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`
+- **现象**：前端克隆的node_modules为指向另一工作区的junction，已有allowBuilds仍在pnpm exec lint-staged时触发隐式install，报Aborted removal of modules directory due to no TTY，质量任务未启动。
+- **根因**：命令执行前的依赖状态检查转入重装路径；此次触发重装的更底层原因未确认。allowBuilds不保证禁止重装，共享junction目标也不能当作本克隆独占目录清理。
+- **修复**：先核对junction真实目标，保留无TTY中止，不以CI变量或确认清空批准purge/install。将现有node_modules/.bin加入本次进程PATH，直接node node_modules/lint-staged/bin/lint-staged.js执行原质量任务；不改共享依赖、lock或workspace配置。提交信息用现有commitlint.CMD及UTF-8消息文件校验，避免PowerShell管道损坏中文。
+- **验证**：2026-11-26 canvas-web的junction指向既有arti依赖；直接CLI完成全暂存prettier/eslint/stylelint任务，最终6168项自动回归、类型和commitlint通过，共享依赖及长期钩子未改。
