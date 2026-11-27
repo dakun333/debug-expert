@@ -1439,3 +1439,5 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **根因**：DSH 0.2.2-rc.1的dsh-llm-deepseek响应解码只接受text/thinking/tool_use，网关模型返回redacted_thinking便失败。初始化/以往模型调用成功不保证当前每种响应块兼容；余额不足或HTTP402在同适配器中归类为QUOTA。
 - **排查/修复口径**：先查持久harness.event的turn/end错误码与session JSONL，再核对线上模型及实际解码器；不能从前端通用RuntimeError猜余额。修复方向为采用完整支持opaque/redacted内容及多轮回放的适配器/网关协议，验证真实文本与工具续轮后发布；不直接删除未知块、伪造completed或自动重放原收费任务。
 - **验证**：2026-11-26现场gpt-6.1-terra对话约3秒失败，零画布operations；原适配器离线SSE返回redacted块复现UNSUPPORTED_CONTENT，模拟402余额不足为QUOTA，普通thinking正常stop。实际余额未查询，协议修复及线上发布尚未执行。
+- **本地修复（2026-11-27）**：canvas-agent的Node24 --import加载钩子按固定发布包SHA-256/唯一锚点扩展DeepSeek适配器，不写node_modules或切provider/model；opaque data只保存在v1 replay reasoning.redactedData，durable reasoning为空，工具续轮/重启时原样重建redacted_thinking。保留旧thinking签名，损坏/跨模型opaque回放在HTTP前拒绝，不降级丢数据。--import在Windows传Path.as_uri()，避免盘符ESM协议错误（#119）。业务事件移除reasoning/stream/replay，固定消息白名单保留错误分类，不透传供应商文本。
+- **修复验证**：真实DSH本地SSE验证两轮工具回执、进程恢复、opaque/签名持久、公开事件脱敏、文本、取消、失败后显式新消息恢复及QUOTA/AUTH/RATE_LIMIT/未知块/格式/流截断；真实适配器mock fetch验证旧v1签名、损坏/跨模型拒绝、max-token裁剪对齐、opaque delta/abort和源码门禁。后端42项单测通过。实际余额、收费模型/业务效果未验；线上尚未发布，旧任务未重放。
