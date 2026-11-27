@@ -1441,3 +1441,12 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **验证**：2026-11-26现场gpt-6.1-terra对话约3秒失败，零画布operations；原适配器离线SSE返回redacted块复现UNSUPPORTED_CONTENT，模拟402余额不足为QUOTA，普通thinking正常stop。实际余额未查询，协议修复及线上发布尚未执行。
 - **本地修复（2026-11-27）**：canvas-agent的Node24 --import加载钩子按固定发布包SHA-256/唯一锚点扩展DeepSeek适配器，不写node_modules或切provider/model；opaque data只保存在v1 replay reasoning.redactedData，durable reasoning为空，工具续轮/重启时原样重建redacted_thinking。保留旧thinking签名，损坏/跨模型opaque回放在HTTP前拒绝，不降级丢数据。--import在Windows传Path.as_uri()，避免盘符ESM协议错误（#119）。业务事件移除reasoning/stream/replay，固定消息白名单保留错误分类，不透传供应商文本。
 - **修复验证**：真实DSH本地SSE验证两轮工具回执、进程恢复、opaque/签名持久、公开事件脱敏、文本、取消、失败后显式新消息恢复及QUOTA/AUTH/RATE_LIMIT/未知块/格式/流截断；真实适配器mock fetch验证旧v1签名、损坏/跨模型拒绝、max-token裁剪对齐、opaque delta/abort和源码门禁。后端42项单测通过。实际余额、收费模型/业务效果未验；线上尚未发布，旧任务未重放。
+- **部署验证（2026-11-27）**：用户确认后117助手API/Worker已更新canvas-agent:messages-20261127-063146并healthy，MySQL/Redis正常；镜像内协议/恢复/错误回归通过，真实gpt-6.1-terra完成唯一工具调用和随机回执最终回复，运行源码与发布一致，API/Nginx未登录401。图片拆分效果与剩余额度未验，旧任务未重放。
+
+### 129. Docker tmpfs 默认 noexec，Node 原生模块临时缓存无法映射
+
+- **标签**：`docker` `tmpfs` `noexec` `node-addon` `DSH` `failed to map segment`
+- **现象**：镜像内真实Harness初始化退出，尾部报原生binding不存在；查看完整attempts发现预构建.node文件已存在，但从TMPDIR缓存加载时failed to map segment from shared object。
+- **根因**：离线测试用--tmpfs /app/data:rw,uid=10001,gid=10001默认noexec，原生模块loader将二进制物化到TMPDIR后dlopen不能建立可执行映射；不是Messages加载钩子或缺依赖，无钩子同样失败。
+- **修复**：仅为本次隔离测试临时挂载显式加exec（--tmpfs /app/data:rw,exec,uid=10001,gid=10001），或使用授权范围内可执行缓存目录；不修改生产权限、依赖、不伪造原生binding。诊断先看完整预构建attempts，勿只看末尾local-build MODULE_NOT_FOUND。
+- **验证**：2026-11-27同一镜像改测试挂载后真实DSH隐藏块、工具续轮、重启恢复、取消及分类全通过，服务错误单测通过，生产正常bind上真实网关工具探针也通过。
