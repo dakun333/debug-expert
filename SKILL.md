@@ -1431,3 +1431,11 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **根因**：命令执行前的依赖状态检查转入重装路径；此次触发重装的更底层原因未确认。allowBuilds不保证禁止重装，共享junction目标也不能当作本克隆独占目录清理。
 - **修复**：先核对junction真实目标，保留无TTY中止，不以CI变量或确认清空批准purge/install。将现有node_modules/.bin加入本次进程PATH，直接node node_modules/lint-staged/bin/lint-staged.js执行原质量任务；不改共享依赖、lock或workspace配置。提交信息用现有commitlint.CMD及UTF-8消息文件校验，避免PowerShell管道损坏中文。
 - **验证**：2026-11-26 canvas-web的junction指向既有arti依赖；直接CLI完成全暂存prettier/eslint/stylelint任务，最终6168项自动回归、类型和commitlint通过，共享依赖及长期钩子未改。
+
+### 128. DSH DeepSeek Messages 不支持网关 redacted_thinking，不能误判额度不足
+
+- **标签**：`dsh` `Messages` `gpt` `redacted_thinking` `UNSUPPORTED_CONTENT` `QUOTA` `gateway`
+- **现象**：助手仅显示RuntimeError通用执行失败；现场turn/end实际为UNSUPPORTED_CONTENT，消息为DeepSeek Messages does not support response block redacted_thinking，尚无画布工具操作。
+- **根因**：DSH 0.2.2-rc.1的dsh-llm-deepseek响应解码只接受text/thinking/tool_use，网关模型返回redacted_thinking便失败。初始化/以往模型调用成功不保证当前每种响应块兼容；余额不足或HTTP402在同适配器中归类为QUOTA。
+- **排查/修复口径**：先查持久harness.event的turn/end错误码与session JSONL，再核对线上模型及实际解码器；不能从前端通用RuntimeError猜余额。修复方向为采用完整支持opaque/redacted内容及多轮回放的适配器/网关协议，验证真实文本与工具续轮后发布；不直接删除未知块、伪造completed或自动重放原收费任务。
+- **验证**：2026-11-26现场gpt-6.1-terra对话约3秒失败，零画布operations；原适配器离线SSE返回redacted块复现UNSUPPORTED_CONTENT，模拟402余额不足为QUOTA，普通thinking正常stop。实际余额未查询，协议修复及线上发布尚未执行。
