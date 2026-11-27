@@ -1450,3 +1450,19 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **根因**：离线测试用--tmpfs /app/data:rw,uid=10001,gid=10001默认noexec，原生模块loader将二进制物化到TMPDIR后dlopen不能建立可执行映射；不是Messages加载钩子或缺依赖，无钩子同样失败。
 - **修复**：仅为本次隔离测试临时挂载显式加exec（--tmpfs /app/data:rw,exec,uid=10001,gid=10001），或使用授权范围内可执行缓存目录；不修改生产权限、依赖、不伪造原生binding。诊断先看完整预构建attempts，勿只看末尾local-build MODULE_NOT_FOUND。
 - **验证**：2026-11-27同一镜像改测试挂载后真实DSH隐藏块、工具续轮、重启恢复、取消及分类全通过，服务错误单测通过，生产正常bind上真实网关工具探针也通过。
+
+### 130. React act 回调返回异步订阅 Promise，未 await 导致整文件测试串联失败
+
+- **标签**：`react19` `vitest` `act` `Promise` `SSE` `WebSocket` `测试隔离`
+- **现象**：首个测试执行act(() => snapshot(...))后立即找不到新结果，后续测试全为空DOM，stderr提示You called act(async () => ...) without await。
+- **根因**：snapshot订阅函数实际为async；简写箭头或自动修复后的return把Promise返回给act，使其进入异步scope。调用方未await，scope未关闭导致后续渲染与清理串联污染；不代表所有生产功能同时失败。
+- **修复**：需要等待订阅完成时使用await act(async () => { await snapshot(...); })；同步派发使用块体且不返回Promise。不要忽略未处理错误、删用例或改生产异步订阅以适配探针。
+- **验证**：2026-11-27助手结果身份引用新增用例改为显式await后，Panel八项及整批十八文件179项通过，后续测试不再为空。
+
+### 131. Playwright dispatch_event 的 paste 默认不是 ClipboardEvent，clipboardData 丢失
+
+- **标签**：`playwright` `browser` `paste` `ClipboardEvent` `DataTransfer` `React`
+- **现象**：Chrome隔离探针dispatch_event('paste', {clipboardData})后上传未发生，pageerror为Cannot read properties of undefined (reading 'files')；相同DataTransfer的drop正常。
+- **根因**：该Playwright版本的通用事件构造未为paste创建原生ClipboardEvent，初始化对象里的clipboardData不成为事件属性；React合成粘贴事件因此拿不到媒体数据。
+- **修复**：用locator.evaluate在浏览器内构造new ClipboardEvent('paste', {bubbles:true,cancelable:true,clipboardData})并派发；需要真实系统剪贴板时使用授权的浏览器剪贴板能力和键盘粘贴。不要为探针伪事件修改生产上传或把无数据当成功。
+- **验证**：2026-11-27改原生构造后，生产Composer成功优先读取PNG、面板仅一次上传并同步引用/@；Chrome pageerror=0。
