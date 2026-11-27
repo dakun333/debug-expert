@@ -1466,3 +1466,11 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **根因**：该Playwright版本的通用事件构造未为paste创建原生ClipboardEvent，初始化对象里的clipboardData不成为事件属性；React合成粘贴事件因此拿不到媒体数据。
 - **修复**：用locator.evaluate在浏览器内构造new ClipboardEvent('paste', {bubbles:true,cancelable:true,clipboardData})并派发；需要真实系统剪贴板时使用授权的浏览器剪贴板能力和键盘粘贴。不要为探针伪事件修改生产上传或把无数据当成功。
 - **验证**：2026-11-27改原生构造后，生产Composer成功优先读取PNG、面板仅一次上传并同步引用/@；Chrome pageerror=0。
+
+### 132. Playwright route 单星不匹配查询参数里的斜杠，OSS 缩略探针误发真实网络
+
+- **标签**：`playwright` `route` `glob` `OSS` `x-oss-process` `axios` `Network Error`
+- **现象**：暖原图探针正常，冷缩略图一直为空；IntersectionObserver确认可见、资源池确实acquire，但mock请求计数为0并出现Axios Network Error。
+- **根因**：route的单星不跨斜杠，OSS缩略查询含image/resize,w_160/format,webp，末尾*匹配不到整个URL；本地读取另会经getOssImageFetchUrl转为/oss-proxy，只有CDN route也不完整。
+- **修复**：隔离探针对CDN及同源/oss-proxy批准路径都使用末尾**或精确谓词匹配，覆盖查询中的斜杠；先核对事件可见性、acquire及匹配计数，不为探针漏拦截改生产资源加载或忽略失败。
+- **验证**：2026-11-27Agent生产组件/真实资源池Chrome探针改两类route为**后，暖图1请求、冷缩略1请求、冷原图浏览时1请求，关闭重开无新增，全部正常解码且pageerror=0。
