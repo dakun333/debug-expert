@@ -1474,3 +1474,11 @@ claude mcp reset-project-choices       # 重置项目的 .mcp.json 批准/拒绝
 - **根因**：route的单星不跨斜杠，OSS缩略查询含image/resize,w_160/format,webp，末尾*匹配不到整个URL；本地读取另会经getOssImageFetchUrl转为/oss-proxy，只有CDN route也不完整。
 - **修复**：隔离探针对CDN及同源/oss-proxy批准路径都使用末尾**或精确谓词匹配，覆盖查询中的斜杠；先核对事件可见性、acquire及匹配计数，不为探针漏拦截改生产资源加载或忽略失败。
 - **验证**：2026-11-27Agent生产组件/真实资源池Chrome探针改两类route为**后，暖图1请求、冷缩略1请求、冷原图浏览时1请求，关闭重开无新增，全部正常解码且pageerror=0。
+
+### 133. Ant Modal portal 的外层 dialog 不在 modalRender 包装内，滚轮 contains 守卫漏标题区域
+
+- **标签**：`antd6` `Modal` `portal` `modalRender` `ref` `wheel` `contains`
+- **现象**：普通Agent面板Ctrl滚轮已拦截，但对Modal role=dialog派发的可取消滚轮defaultPrevented仍为false；只按modalRender包装contains检查漏掉弹框外层。
+- **根因**：Ant Modal的role=dialog外层由库创建，modalRender只包内层内容，外层不是ref元素的后代；portal子树也可能晚于父effect挂载，一次读取ref为空就不装监听会永久漏拦截。
+- **修复**：原生window capture/passive:false监听按弹框open安装，在事件发生时读取最新ref，区域取ref.closest('[role="dialog"]')或普通面板自身；关闭释放监听，普通wheel仅截传播保留默认DOM滚动，Ctrl/Cmd调用既有防浏览器缩放入口。
+- **验证**：2026-11-27Panel/Messages共15项通过；Chrome实际Ctrl滚轮后DPR/innerWidth/visualViewport.scale不变，dialog/标题/输入meta事件均拦截，普通文本滚动保持，pageerror=0。
